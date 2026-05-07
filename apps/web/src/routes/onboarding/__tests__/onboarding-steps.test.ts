@@ -4,7 +4,6 @@ import type { SetupState } from '@/lib/shared/db-types'
 
 const baseState = (overrides?: Partial<SetupState>): SetupState => ({
   version: 1,
-  source: 'cloud',
   steps: { core: false, workspace: false, boards: false },
   ...overrides,
 })
@@ -36,10 +35,11 @@ describe('visibleSteps', () => {
     expect(labels).toEqual(['Use case', 'Boards'])
   })
 
-  it('cloud tenant pre-seeded by /admin/setup sees only the steps still owed', () => {
-    // CP pushes workspace name + use case at provision time. The user
-    // shows up in /onboarding/account first (no session yet), creates
-    // an account, then sees just the boards step — not "Step 4 of 4".
+  it('pre-seeded tenant shows only the steps still owed', () => {
+    // Workspace name + use case stamped at deploy time (env-baked
+    // seed-workspace.mjs). The user shows up in /onboarding/account
+    // first (no session yet), creates an account, then sees just
+    // the boards step — not "Step 4 of 4".
     const setupState = baseState({
       useCase: 'saas',
       steps: { core: true, workspace: true, boards: false },
