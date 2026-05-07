@@ -27,14 +27,22 @@ export function pickOnboardingStep({ session, state }: PickStepInput): Onboardin
 
   if (state.needsInvitation) return '/auth/login'
 
-  // Route to the FIRST incomplete step in wizard order. Earlier versions
-  // jumped to /onboarding/boards as soon as setupState.steps.workspace
-  // was true — fine when both got filled in by the same wizard pass, but
-  // the cloud control plane can pre-seed the workspace step alone (via
-  // /api/v1/admin/setup) without a useCase, and the user then needs to
-  // pick one. Skipping it left useCase silently false-checkmarked in
-  // the dynamic stepper.
+  // Route to the FIRST incomplete step. Even cloud-source tenants need
+  // a useCase before the dashboard can render the right inbox/widget
+  // defaults — the cloud signup form can omit it, so don't drop the
+  // user past /onboarding/usecase.
   if (!state.setupState?.useCase) return '/onboarding/usecase'
   if (!state.setupState?.steps?.workspace) return '/onboarding/workspace'
+
+  // Cloud-source admins finish at /admin instead of /onboarding/boards
+  // — the CP already pre-stamped the workspace + chose a useCase via
+  // /api/v1/admin/setup, and OIDC sign-in promoted them to admin. The
+  // boards step is optional (the dashboard handles empty boards as an
+  // empty-state hint), so keep it for self-hosted only where the user
+  // is creating their first board as part of the onboarding pass.
+  if (state.setupState?.source === 'cloud' && state.principalRecord?.role === 'admin') {
+    return '/admin'
+  }
+
   return '/onboarding/boards'
 }

@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { ArrowPathIcon } from '@heroicons/react/24/solid'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { authClient } from '@/lib/client/auth-client'
-import { checkOnboardingState } from '@/lib/server/functions/admin'
+import { checkOnboardingState, getPublicAuthConfig } from '@/lib/server/functions/admin'
 
 export const Route = createFileRoute('/onboarding/_layout/account')({
   loader: async ({ context }) => {
@@ -29,17 +29,65 @@ export const Route = createFileRoute('/onboarding/_layout/account')({
       throw redirect({ to: '/onboarding/usecase' })
     }
 
-    return {}
+    // Cloud-mode tenants must sign in via the control-plane OIDC provider
+    // — the manual signup form is intentionally hidden so a non-admin
+    // self-serve account can't shadow the cloud admin. Self-hosted
+    // instances (no CP_OAUTH_* env) keep the original Jane-Doe form.
+    const { cloudAuthEnabled } = await getPublicAuthConfig()
+    return { cloudAuthEnabled }
   },
   component: AccountStep,
 })
 
 function AccountStep() {
+  const { cloudAuthEnabled } = Route.useLoaderData()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+
+  // Auto-trigger the OIDC redirect on mount in cloud mode. The control
+  // plane is the only legitimate path to admin on a managed tenant, so
+  // skipping the click avoids a useless intermediate page. If the kick-
+  // off fails (network, CP down) the button below stays interactable as
+  // a manual retry.
+  useEffect(() => {
+    if (!cloudAuthEnabled) return
+    void authClient.signIn
+      .oauth2({ providerId: 'cp', callbackURL: '/' })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Sign-in failed'))
+  }, [cloudAuthEnabled])
+
+  if (cloudAuthEnabled) {
+    return (
+      <div className="w-full max-w-md mx-auto">
+        <div className="overflow-hidden rounded-2xl border border-border/50 bg-gradient-to-b from-card/90 to-card/70 backdrop-blur-sm">
+          <div className="p-8 text-center">
+            <h1 className="text-2xl font-bold">Welcome to Quackback</h1>
+            <p className="mt-2 text-muted-foreground">
+              Sign in with your Quackback Cloud account to continue
+            </p>
+            {error && (
+              <div className="mt-4 rounded-lg bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
+                {error}
+              </div>
+            )}
+            <Button
+              onClick={() =>
+                void authClient.signIn
+                  .oauth2({ providerId: 'cp', callbackURL: '/' })
+                  .catch((err) => setError(err instanceof Error ? err.message : 'Sign-in failed'))
+              }
+              className="mt-6 w-full h-11"
+            >
+              Continue with Quackback Cloud
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()

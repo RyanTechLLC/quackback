@@ -71,6 +71,40 @@ describe('pickOnboardingStep', () => {
     ).toBe('/onboarding/usecase')
   })
 
+  it('routes cloud-source admin with workspace + useCase complete to /admin', () => {
+    expect(
+      pickOnboardingStep({
+        session: { userId: 'u1' },
+        state: {
+          setupState: {
+            version: 1,
+            source: 'cloud',
+            useCase: 'saas',
+            steps: { core: true, workspace: true, boards: false },
+          },
+          principalRecord: { id: 'p1', role: 'admin' },
+        },
+      })
+    ).toBe('/admin')
+  })
+
+  it('keeps cloud-source MEMBER on /onboarding/boards (admin gate)', () => {
+    expect(
+      pickOnboardingStep({
+        session: { userId: 'u1' },
+        state: {
+          setupState: {
+            version: 1,
+            source: 'cloud',
+            useCase: 'saas',
+            steps: { core: true, workspace: true, boards: false },
+          },
+          principalRecord: { id: 'p1', role: 'member' },
+        },
+      })
+    ).toBe('/onboarding/boards')
+  })
+
   it('falls back to /onboarding/usecase when nothing has been chosen', () => {
     expect(
       pickOnboardingStep({
