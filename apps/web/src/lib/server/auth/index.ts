@@ -15,8 +15,8 @@ import { generateId } from '@quackback/ids'
 import { config } from '@/lib/server/config'
 
 // Plugin callbacks (magicLink, emailOTP) stash tokens here instead of
-// emailing — callers that own the email template (invitations, Cloud
-// bootstrap, combined sign-in email) drain the stash and email themselves.
+// emailing — callers that own the email template (invitations,
+// combined sign-in email) drain the stash and email themselves.
 const STASH_TTL_MS = 30_000
 
 function makeStash<T>() {

@@ -35,18 +35,27 @@ export function makeReconcileDeps(): ReconcileDeps {
       // Pass a TypeID string for the id; the typeIdColumn driver
       // converts it to UUID for storage. createdAt is NOT NULL with no
       // default at the column level, so we set it here.
-      await db.insert(settings).values({
-        id: generateId('workspace'),
-        name: insert.name,
-        slug: insert.slug,
-        createdAt: new Date(),
-        setupState: insert.setupState,
-        tierLimits: insert.tierLimits,
-        featureFlags: insert.featureFlags,
-        authConfig: insert.authConfig,
-        managedFieldPaths: insert.managedFieldPaths,
-        state: insert.state,
-      })
+      //
+      // onConflictDoNothing on slug guards the narrow race between this
+      // path and onboarding's saveUseCaseFn — both can attempt the
+      // first INSERT on a fresh install. If we lose the race, the next
+      // watcher tick reads the now-existing row and updates it via the
+      // normal reconcile path.
+      await db
+        .insert(settings)
+        .values({
+          id: generateId('workspace'),
+          name: insert.name,
+          slug: insert.slug,
+          createdAt: new Date(),
+          setupState: insert.setupState,
+          tierLimits: insert.tierLimits,
+          featureFlags: insert.featureFlags,
+          authConfig: insert.authConfig,
+          managedFieldPaths: insert.managedFieldPaths,
+          state: insert.state,
+        })
+        .onConflictDoNothing({ target: settings.slug })
     },
     invalidateSettingsCache: async () => {
       await invalidateSettingsCache()

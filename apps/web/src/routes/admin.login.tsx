@@ -67,7 +67,7 @@ export const Route = createFileRoute('/admin/login')({
     // `ssoOidc.enabled=true` whose client secret hasn't arrived in env
     // would otherwise produce a CTA that 404s on click.
     const ssoIsDefault = Boolean(ssoOidc?.enabled) && Boolean(ssoOidc?.isDefault) && ssoIsRegistered
-    const ssoProviderName = ssoOidc?.providerName ?? 'Quackback Cloud'
+    const ssoProviderName = ssoOidc?.providerName ?? 'SSO'
 
     return {
       errorMessage,

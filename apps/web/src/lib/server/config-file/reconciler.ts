@@ -46,9 +46,9 @@ export interface ReconcileDeps {
   updateSettings: (update: SettingsUpdate) => Promise<void>
   /** Insert a fresh settings row when none exists yet. Called by the
    *  reconciler when the file declares at least workspace.name + slug
-   *  (the minimum required for a valid row). Phase E removed the
-   *  legacy seed-workspace path, so the file is now the sole seed
-   *  channel for cloud-provisioned tenants. */
+   *  (the minimum required for a valid row). With the legacy
+   *  seed-workspace path removed, the file is the sole seed channel
+   *  when no settings row exists yet. */
   createSettings: (insert: SettingsInsert) => Promise<void>
   invalidateSettingsCache: () => Promise<void>
   invalidateTierLimitsCache: () => Promise<void>
@@ -80,8 +80,8 @@ export async function reconcileFileIntoDb(
 ): Promise<void> {
   const current = await deps.readSettings()
   if (!current) {
-    // No settings row exists yet. Phase E dropped seed-workspace.ts,
-    // so the file watcher is the sole seed channel for fresh tenants.
+    // No settings row exists yet. With seed-workspace.ts retired, the
+    // file watcher is the sole seed channel for a fresh install.
     // Bootstrap requires at least workspace.name + slug; without those
     // we can't satisfy the NOT NULL columns, so wait for a richer file.
     if (!spec.workspace?.name || !spec.workspace?.slug) return

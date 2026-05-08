@@ -44,7 +44,13 @@ export function watchConfigFile(
       queued = true
       return
     }
-    inFlight = doTick()
+    inFlight = doTick().catch((err) => {
+      // The whole pipeline (load → onChange → reconcile) bubbles errors
+      // here. Without this catch they become unhandled rejections that
+      // crash the Node process under default handlers. Log loudly + let
+      // the next poll/native-watch tick retry.
+      console.error('[config-file] tick failed:', err)
+    })
     try {
       await inFlight
     } finally {
@@ -56,7 +62,8 @@ export function watchConfigFile(
     }
   }
 
-  // Initial load.
+  // Initial load. Catches at the tick boundary above; this just keeps
+  // the synchronous return path from holding a floating promise.
   void tick()
 
   // Polling fallback — guaranteed to fire even if fs.watch missed a

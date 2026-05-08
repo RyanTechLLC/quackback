@@ -90,7 +90,7 @@ const oauthProvidersSchema = z
 const ssoOidcSchema = z
   .object({
     enabled: z.boolean(),
-    providerName: z.string().min(1).max(100).default('Quackback Cloud'),
+    providerName: z.string().min(1).max(100).default('SSO'),
     discoveryUrl: z.string().url(),
     clientId: z.string().min(1),
     /** Show as the prominent default CTA on the admin login page.

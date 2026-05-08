@@ -90,12 +90,36 @@ describe('scheduleSsoSecretRetry', () => {
     expect(h.log).not.toHaveBeenCalled()
   })
 
-  it('allows a fresh retry to be scheduled after the previous one fires', () => {
+  it('re-arms the timer when the secret is still missing at fire time', () => {
     const h = makeDeps({ secret: undefined })
     scheduleSsoSecretRetry(h.deps)
+    expect(h.deps.schedule).toHaveBeenCalledTimes(1)
     h.fireAllPending()
-    // First retry consumed; a subsequent createAuth() seeing the
-    // secret still missing should be able to queue another.
+    // The cached _auth instance never re-enters createAuth() on its
+    // own, so the retry has to keep itself going until the secret
+    // shows up.
+    expect(h.deps.schedule).toHaveBeenCalledTimes(2)
+    expect(h.resetAuth).not.toHaveBeenCalled()
+  })
+
+  it('stops re-arming after the secret materialises', () => {
+    const h = makeDeps({ secret: undefined })
+    scheduleSsoSecretRetry(h.deps)
+    h.fireAllPending() // first fire: secret still missing → re-arm
+    expect(h.deps.schedule).toHaveBeenCalledTimes(2)
+    h.setSecret('arrived')
+    h.fireAllPending() // second fire: secret found → resetAuth, no re-arm
+    expect(h.resetAuth).toHaveBeenCalledTimes(1)
+    expect(h.deps.schedule).toHaveBeenCalledTimes(2)
+  })
+
+  it('allows a fresh retry to be scheduled after the previous one fires', () => {
+    const h = makeDeps({ secret: 'present' })
+    scheduleSsoSecretRetry(h.deps)
+    h.fireAllPending() // secret was present → resetAuth, no re-arm
+    // First retry consumed; a subsequent createAuth() that finds the
+    // secret missing again should be able to queue another.
+    h.setSecret(undefined)
     scheduleSsoSecretRetry(h.deps)
     expect(h.deps.schedule).toHaveBeenCalledTimes(2)
   })

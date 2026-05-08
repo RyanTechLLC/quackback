@@ -33,17 +33,25 @@ let _activeHandle: unknown = null
 
 export function scheduleSsoSecretRetry(deps: SsoRetryDeps): void {
   if (_activeHandle) return
-  const handle = deps.schedule(() => {
+  const fire = () => {
     _activeHandle = null
     if (deps.getSecret()) {
       deps.log?.('[auth] SSO_OIDC_CLIENT_SECRET materialized; re-initializing auth')
       deps.resetAuth()
+      return
     }
-    // If the secret still isn't there, silently let it be — another
-    // request will hit createAuth(), see the missing secret, and queue
-    // another retry. Avoids hammering env reads on a permanently
-    // misconfigured workspace.
-  }, SSO_SECRET_RETRY_MS)
+    // Secret still missing. Re-arm rather than waiting on an unrelated
+    // resetAuth() to queue the next check — `_auth` stays cached, so
+    // ordinary requests do NOT re-enter createAuth(). Without this loop,
+    // a secret that arrives after the first 60s window would leave SSO
+    // unavailable until pod restart.
+    armTimer(deps, fire)
+  }
+  armTimer(deps, fire)
+}
+
+function armTimer(deps: SsoRetryDeps, fire: () => void): void {
+  const handle = deps.schedule(fire, SSO_SECRET_RETRY_MS)
   _activeHandle = handle
   // Don't keep the Node event loop alive just for this retry — important
   // in tests + during SIGTERM, where we'd otherwise hang for the full
