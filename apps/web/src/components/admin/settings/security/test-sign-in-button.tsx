@@ -23,6 +23,11 @@ import { SSO_TEST_POSTMESSAGE_SOURCE } from '@/lib/shared/sso-test-keys'
 
 const POPUP_FEATURES = 'width=600,height=720'
 const POLL_INTERVAL_MS = 2000
+// 150 polls * 2s = 5 minutes. The Redis test-session TTL is 10
+// minutes; bail well before that so we don't poll an expired session
+// forever after the admin closes the popup without completing the
+// IdP round-trip.
+const MAX_POLLS = 150
 
 /** Inline mirror of {@link HandshakeResult} minus the failure-branch
  *  `raw?: unknown` debug field. The callback route strips `raw` before
@@ -114,9 +119,17 @@ export function TestSignInButton({ disabled }: { disabled?: boolean }) {
     // Polling fallback: if the popup lands on an off-origin error page
     // the postMessage will never fire, but the callback route may still
     // have written a diagnostic to Redis. Cleared the moment a result
-    // arrives or the component unmounts.
+    // arrives, the poll cap is hit, or the component unmounts.
     clearPoll()
+    let pollCount = 0
     pollRef.current = setInterval(async () => {
+      pollCount += 1
+      if (pollCount > MAX_POLLS) {
+        clearPoll()
+        setTesting(false)
+        setError('Test sign-in did not complete. Try again or check your IdP redirect URI.')
+        return
+      }
       try {
         const diag = await pollResult({ data: { testId: r.testId } })
         if (diag && diag.result) {
