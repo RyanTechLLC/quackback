@@ -164,9 +164,12 @@ export const hooksBefore = createAuthMiddleware(async (ctx) => {
 
   const { db, user: userTable, principal: principalTable, eq } = await import('@/lib/server/db')
   type UserId = `user_${string}`
+  // Single read per attempt: pull both `id` (for the principal lookup)
+  // and `twoFactorEnabled` (for the Require-2FA gate below) so the hot
+  // password-sign-in path makes one DB round-trip instead of two.
   const userRow = await db.query.user.findFirst({
     where: eq(userTable.email, email),
-    columns: { id: true },
+    columns: { id: true, twoFactorEnabled: true },
   })
   if (!userRow) return
 
@@ -196,14 +199,10 @@ export const hooksBefore = createAuthMiddleware(async (ctx) => {
     const workspaceRequired = tenant?.authConfig?.twoFactor?.required === true
     if (workspaceRequired) {
       const { shouldRequire2FA } = await import('./two-factor-policy')
-      const userFull = await db.query.user.findFirst({
-        where: eq(userTable.id, userRow.id as UserId),
-        columns: { twoFactorEnabled: true },
-      })
       if (
         shouldRequire2FA({
           role: principalRow.role as 'admin' | 'member' | 'user',
-          userHas2FA: userFull?.twoFactorEnabled === true,
+          userHas2FA: userRow.twoFactorEnabled === true,
           workspaceRequired,
         })
       ) {
