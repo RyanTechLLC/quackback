@@ -57,6 +57,20 @@ export const lookupAuthMethodsFn = createServerFn({ method: 'POST' })
         ? (tenant?.publicPortalConfig?.oauth ?? {})
         : (tenant?.publicAuthConfig?.oauth ?? {})
 
+    // Workspace-wide enforcement branch: when ssoOidc.required is on
+    // and we're answering for the team surface, every team email gets
+    // sso-redirect — no per-email check (would leak existence). Same
+    // unavailable guard as the per-domain branch.
+    if (data.surface === 'team' && sso?.required === true) {
+      const { isSsoActuallyRegistered } = await import('@/lib/server/auth/sso-secret')
+      const { getTierLimits } = await import('@/lib/server/domains/settings/tier-limits.service')
+      const registered = await isSsoActuallyRegistered(sso, await getTierLimits())
+      if (!registered) {
+        return { kind: 'sso-unavailable', reason: 'not-registered' }
+      }
+      return { kind: 'sso-redirect' }
+    }
+
     // Verified-domain routing applies to both surfaces. Confirm SSO is
     // actually registered (creds present, tier flag on) before promising
     // a redirect — otherwise the user would land on a non-existent
