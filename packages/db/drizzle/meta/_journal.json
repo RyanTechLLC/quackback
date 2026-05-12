@@ -414,6 +414,13 @@
       "when": 1778457600005,
       "tag": "0058_sso_recovery_codes",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1778457600006,
+      "tag": "0059_sso_required_default",
+      "breakpoints": true
     }
   ]
 }
