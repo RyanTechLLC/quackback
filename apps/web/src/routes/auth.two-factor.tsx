@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp'
 import { authClient } from '@/lib/client/auth-client'
 
 const searchSchema = z.object({
@@ -24,14 +25,14 @@ function TwoFactorPage() {
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function verifyCode(value: string) {
+    if (pending) return
     setError(null)
     setPending(true)
     try {
       const { error: betterErr } = useBackup
-        ? await authClient.twoFactor.verifyBackupCode({ code })
-        : await authClient.twoFactor.verifyTotp({ code })
+        ? await authClient.twoFactor.verifyBackupCode({ code: value })
+        : await authClient.twoFactor.verifyTotp({ code: value })
       if (betterErr) throw new Error(betterErr.message ?? 'Code rejected.')
       const dest =
         search.callbackUrl && search.callbackUrl.startsWith('/') ? search.callbackUrl : '/'
@@ -41,6 +42,11 @@ function TwoFactorPage() {
     } finally {
       setPending(false)
     }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    void verifyCode(code)
   }
 
   return (
@@ -57,16 +63,41 @@ function TwoFactorPage() {
         <Label htmlFor="tf-input" className="sr-only">
           {useBackup ? 'Backup code' : 'Code'}
         </Label>
-        <Input
-          id="tf-input"
-          inputMode={useBackup ? 'text' : 'numeric'}
-          pattern={useBackup ? undefined : '\\d{6}'}
-          maxLength={useBackup ? 16 : 6}
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          autoFocus
-          required
-        />
+        {useBackup ? (
+          <Input
+            id="tf-input"
+            inputMode="text"
+            maxLength={16}
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            autoFocus
+            required
+          />
+        ) : (
+          <div className="flex justify-center">
+            <InputOTP
+              id="tf-input"
+              maxLength={6}
+              value={code}
+              onChange={setCode}
+              onComplete={(value) => void verifyCode(value)}
+              disabled={pending}
+              autoFocus
+              autoComplete="one-time-code"
+              aria-label="Authenticator code"
+              aria-invalid={!!error || undefined}
+            >
+              <InputOTPGroup>
+                <InputOTPSlot index={0} />
+                <InputOTPSlot index={1} />
+                <InputOTPSlot index={2} />
+                <InputOTPSlot index={3} />
+                <InputOTPSlot index={4} />
+                <InputOTPSlot index={5} />
+              </InputOTPGroup>
+            </InputOTP>
+          </div>
+        )}
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -78,7 +109,11 @@ function TwoFactorPage() {
       </form>
       <button
         type="button"
-        onClick={() => setUseBackup(!useBackup)}
+        onClick={() => {
+          setUseBackup(!useBackup)
+          setCode('')
+          setError(null)
+        }}
         className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
       >
         {useBackup ? 'Use authenticator code instead' : 'Use a backup code instead'}

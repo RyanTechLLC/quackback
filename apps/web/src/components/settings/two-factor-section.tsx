@@ -11,6 +11,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
+import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp'
 import { authClient } from '@/lib/client/auth-client'
 
 interface Props {
@@ -92,12 +93,12 @@ function SetupDialog({ onClose, onComplete }: { onClose: () => void; onComplete:
     }
   }
 
-  async function handleVerify(e: React.FormEvent) {
-    e.preventDefault()
+  async function verifyCode(value: string) {
+    if (pending) return
     setError(null)
     setPending(true)
     try {
-      const { error: betterErr } = await authClient.twoFactor.verifyTotp({ code })
+      const { error: betterErr } = await authClient.twoFactor.verifyTotp({ code: value })
       if (betterErr) throw new Error(betterErr.message ?? 'Code rejected.')
       setStep('backup')
     } catch (err) {
@@ -105,6 +106,11 @@ function SetupDialog({ onClose, onComplete }: { onClose: () => void; onComplete:
     } finally {
       setPending(false)
     }
+  }
+
+  function handleVerify(e: React.FormEvent) {
+    e.preventDefault()
+    void verifyCode(code)
   }
 
   return (
@@ -164,17 +170,29 @@ function SetupDialog({ onClose, onComplete }: { onClose: () => void; onComplete:
             <Label htmlFor="tf-code" className="sr-only">
               Code
             </Label>
-            <Input
-              id="tf-code"
-              inputMode="numeric"
-              pattern="\d{6}"
-              maxLength={6}
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="123456"
-              autoFocus
-              required
-            />
+            <div className="flex justify-center">
+              <InputOTP
+                id="tf-code"
+                maxLength={6}
+                value={code}
+                onChange={setCode}
+                onComplete={(value) => void verifyCode(value)}
+                disabled={pending}
+                autoFocus
+                autoComplete="one-time-code"
+                aria-label="Authenticator code"
+                aria-invalid={!!error || undefined}
+              >
+                <InputOTPGroup>
+                  <InputOTPSlot index={0} />
+                  <InputOTPSlot index={1} />
+                  <InputOTPSlot index={2} />
+                  <InputOTPSlot index={3} />
+                  <InputOTPSlot index={4} />
+                  <InputOTPSlot index={5} />
+                </InputOTPGroup>
+              </InputOTP>
+            </div>
             {error && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
