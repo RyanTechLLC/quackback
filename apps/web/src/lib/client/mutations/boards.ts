@@ -13,7 +13,7 @@ import {
   type UpdateBoardInput,
   type DeleteBoardInput,
 } from '@/lib/server/functions/boards'
-import type { Board } from '@/lib/shared/db-types'
+import { type Board, DEFAULT_BOARD_AUDIENCE, DEFAULT_BOARD_MODERATION } from '@/lib/shared/db-types'
 import type { BoardId } from '@quackback/ids'
 import { boardKeys } from '@/lib/client/hooks/use-boards-query'
 import { adminQueries } from '@/lib/client/queries/admin'
@@ -41,8 +41,8 @@ export function useCreateBoard() {
         slug: slugify(input.name),
         description: input.description ?? null,
         isPublic: input.isPublic ?? true,
-        audience: { kind: 'public' },
-        moderation: { requireApproval: 'none', trustedSegmentIds: [] },
+        audience: DEFAULT_BOARD_AUDIENCE,
+        moderation: DEFAULT_BOARD_MODERATION,
         settings: {},
         createdAt: new Date(),
         updatedAt: new Date(),

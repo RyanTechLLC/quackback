@@ -1,4 +1,5 @@
 import { db, eq, and, isNull, sql, boards, posts, type Board } from '@/lib/server/db'
+import { getTableColumns } from 'drizzle-orm'
 import type { BoardId } from '@quackback/ids'
 import { NotFoundError, InternalError } from '@/lib/shared/errors'
 import type { BoardWithStats } from './board.types'
@@ -26,20 +27,10 @@ export async function getPublicBoardById(boardId: BoardId): Promise<Board> {
 
 export async function listPublicBoardsWithStats(): Promise<BoardWithStats[]> {
   try {
-    const result = await db
+    const rows = await db
       .select({
-        id: boards.id,
-        slug: boards.slug,
-        name: boards.name,
-        description: boards.description,
-        isPublic: boards.isPublic,
-        audience: boards.audience,
-        moderation: boards.moderation,
-        settings: boards.settings,
-        createdAt: boards.createdAt,
-        updatedAt: boards.updatedAt,
-        deletedAt: boards.deletedAt,
-        postCount: sql<number>`count(${posts.id})::int`.as('post_count'),
+        ...getTableColumns(boards),
+        postCount: sql<number>`coalesce(count(${posts.id}), 0)::int`.as('post_count'),
       })
       .from(boards)
       .leftJoin(posts, and(eq(posts.boardId, boards.id), isNull(posts.deletedAt)))
@@ -47,20 +38,7 @@ export async function listPublicBoardsWithStats(): Promise<BoardWithStats[]> {
       .groupBy(boards.id)
       .orderBy(boards.name)
 
-    return result.map((row) => ({
-      id: row.id,
-      slug: row.slug,
-      name: row.name,
-      description: row.description,
-      isPublic: row.isPublic,
-      audience: row.audience,
-      moderation: row.moderation,
-      settings: row.settings,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      deletedAt: row.deletedAt,
-      postCount: row.postCount ?? 0,
-    }))
+    return rows
   } catch (error) {
     throw new InternalError(
       'DATABASE_ERROR',

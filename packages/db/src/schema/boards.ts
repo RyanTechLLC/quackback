@@ -1,7 +1,13 @@
 import { pgTable, text, timestamp, boolean, jsonb, integer, index } from 'drizzle-orm/pg-core'
-import { relations, sql } from 'drizzle-orm'
+import { relations } from 'drizzle-orm'
 import { typeIdWithDefault } from '@quackback/ids/drizzle'
-import type { BoardSettings, BoardAudience, BoardModeration } from '../types'
+import {
+  type BoardSettings,
+  type BoardAudience,
+  type BoardModeration,
+  DEFAULT_BOARD_AUDIENCE,
+  DEFAULT_BOARD_MODERATION,
+} from '../types'
 
 export const boards = pgTable(
   'boards',
@@ -11,12 +17,10 @@ export const boards = pgTable(
     name: text('name').notNull(),
     description: text('description'),
     isPublic: boolean('is_public').default(true).notNull(),
-    // v1 access controls — see BoardAudience / BoardModeration in ../types.
-    // Backfilled from isPublic at migration time; isPublic stays for one release.
-    audience: jsonb('audience').$type<BoardAudience>().default({ kind: 'public' }).notNull(),
+    audience: jsonb('audience').$type<BoardAudience>().default(DEFAULT_BOARD_AUDIENCE).notNull(),
     moderation: jsonb('moderation')
       .$type<BoardModeration>()
-      .default({ requireApproval: 'none', trustedSegmentIds: [] })
+      .default(DEFAULT_BOARD_MODERATION)
       .notNull(),
     settings: jsonb('settings').$type<BoardSettings>().default({}).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -28,7 +32,6 @@ export const boards = pgTable(
     // Note: boards_slug_unique constraint already provides uniqueness; no separate index needed
     index('boards_is_public_idx').on(table.isPublic),
     index('boards_deleted_at_idx').on(table.deletedAt),
-    index('boards_audience_kind_idx').on(sql`(audience->>'kind')`),
   ]
 )
 
