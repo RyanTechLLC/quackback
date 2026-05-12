@@ -73,6 +73,14 @@ export function TestSignInButton({ disabled }: { disabled?: boolean }) {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<WireResult | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Mirror `modalOpen` in a ref so the message handler + poll tick can
+  // read the latest value without re-attaching every time it flips.
+  // Late postMessages / poll results after close would otherwise clobber
+  // state, leaving stale data visible on the next open.
+  const modalOpenRef = useRef(modalOpen)
+  useEffect(() => {
+    modalOpenRef.current = modalOpen
+  }, [modalOpen])
 
   const clearPoll = () => {
     if (pollRef.current !== null) {
@@ -100,6 +108,7 @@ export function TestSignInButton({ disabled }: { disabled?: boolean }) {
   // ending the test early with garbage data.
   useEffect(() => {
     function onMessage(e: MessageEvent) {
+      if (!modalOpenRef.current) return
       if (e.origin !== window.location.origin) return
       const data = e.data as { source?: string; result?: WireResult } | null
       if (!data || typeof data !== 'object') return
@@ -167,6 +176,12 @@ export function TestSignInButton({ disabled }: { disabled?: boolean }) {
       try {
         const diag = await pollResult({ data: { testId: r.testId } })
         if (diag && diag.result) {
+          if (!modalOpenRef.current) {
+            // Modal was closed mid-poll; drop late result.
+            clearPoll()
+            clearPopup()
+            return
+          }
           setResult(diag.result)
           setTesting(false)
           clearPoll()
