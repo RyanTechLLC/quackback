@@ -393,6 +393,13 @@
       "when": 1778457600002,
       "tag": "0055_hook_deliveries",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1778457600003,
+      "tag": "0056_admin_auth_settings",
+      "breakpoints": true
     }
   ]
 }

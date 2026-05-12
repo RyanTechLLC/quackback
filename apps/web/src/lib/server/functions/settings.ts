@@ -31,7 +31,7 @@ import {
 import { getPublicUrlOrNull } from '@/lib/server/storage/s3'
 import { requireAuth } from './auth-helpers'
 import { getSession } from '@/lib/server/auth/session'
-import { db, principal, user, invitation, eq, ne } from '@/lib/server/db'
+import { db, principal, user, invitation, account, eq, ne, and } from '@/lib/server/db'
 
 // ============================================
 // Read Operations
@@ -74,6 +74,30 @@ export const fetchPublicAuthConfig = createServerFn({ method: 'GET' }).handler(a
     return await getPublicAuthConfig()
   } catch (error) {
     console.error(`[fn:settings] fetchPublicAuthConfig failed:`, error)
+    throw error
+  }
+})
+
+/**
+ * Full team-side auth config including ssoOidc. Admin-only — surfaces
+ * to the admin auth settings page editor. clientSecret is never in
+ * authConfig (it lives on the env), so this is safe to ship to the
+ * admin form even though it's broader than `fetchPublicAuthConfig`.
+ */
+export const fetchAuthConfigFn = createServerFn({ method: 'GET' }).handler(async () => {
+  console.log(`[fn:settings] fetchAuthConfigFn`)
+  try {
+    await requireAuth({ roles: ['admin'] })
+    const { getTenantSettings } = await import('@/lib/server/domains/settings/settings.service')
+    const tenant = await getTenantSettings()
+    return (
+      tenant?.authConfig ?? {
+        oauth: { google: true, github: true, password: false },
+        openSignup: false,
+      }
+    )
+  } catch (error) {
+    console.error(`[fn:settings] fetchAuthConfigFn failed:`, error)
     throw error
   }
 })
@@ -163,10 +187,31 @@ export const fetchUserProfile = createServerFn({ method: 'GET' })
         throw new Error("Access denied: Cannot view other users' profiles")
       }
 
-      const userRecord = await db.query.user.findFirst({
-        where: eq(user.id, userId),
-        columns: { imageKey: true, image: true },
-      })
+      // Profile-page sections (Password, 2FA) depend on the user's auth
+      // posture: do they actually use a password? Is their email
+      // SSO-bound (so password and 2FA are both managed by the IdP)?
+      // Resolve once server-side so the page doesn't fan out to
+      // listAccounts on the client + so we can hide sections that aren't
+      // meaningful for this user.
+      const [userRecord, credentialAccount, { getTenantSettings }] = await Promise.all([
+        db.query.user.findFirst({
+          where: eq(user.id, userId),
+          columns: { imageKey: true, image: true, twoFactorEnabled: true, email: true },
+        }),
+        db.query.account.findFirst({
+          where: and(eq(account.userId, userId), eq(account.providerId, 'credential')),
+          columns: { id: true },
+        }),
+        import('@/lib/server/domains/settings/settings.service'),
+      ])
+
+      const { isHardBoundByVerifiedDomain } = await import('@/lib/server/auth/auth-restrictions')
+      const tenant = await getTenantSettings()
+      const ssoEnforced = isHardBoundByVerifiedDomain(
+        'credential',
+        userRecord?.email ?? null,
+        tenant?.verifiedDomains
+      )
 
       const hasCustomAvatar = !!userRecord?.imageKey
       const oauthAvatarUrl = userRecord?.image ?? null
@@ -175,7 +220,14 @@ export const fetchUserProfile = createServerFn({ method: 'GET' })
         avatarUrl: oauthAvatarUrl,
       })
 
-      return { avatarUrl, oauthAvatarUrl, hasCustomAvatar }
+      return {
+        avatarUrl,
+        oauthAvatarUrl,
+        hasCustomAvatar,
+        twoFactorEnabled: userRecord?.twoFactorEnabled === true,
+        hasPassword: !!credentialAccount,
+        ssoEnforced,
+      }
     } catch (error) {
       console.error(`[fn:settings] fetchUserProfile failed:`, error)
       throw error
@@ -245,6 +297,47 @@ export const updatePortalConfigFn = createServerFn({ method: 'POST' })
       return await updatePortalConfig(data as UpdatePortalConfigInput)
     } catch (error) {
       console.error(`[fn:settings] updatePortalConfigFn failed:`, error)
+      throw error
+    }
+  })
+
+export const updateAuthConfigSchema = z.object({
+  oauth: z.record(z.string(), z.boolean().optional()).optional(),
+  openSignup: z.boolean().optional(),
+  ssoOidc: z
+    .object({
+      enabled: z.boolean().optional(),
+      discoveryUrl: z.string().url().optional(),
+      clientId: z.string().min(1).optional(),
+      autoCreateUsers: z.boolean().optional(),
+      autoProvisionRole: z.enum(['admin', 'member', 'user']).optional(),
+      // Per-domain SSO enforcement is server-owned via
+      // setVerifiedDomainEnforcedFn (writes sso_verified_domain.enforced).
+      // The legacy workspace-wide `ssoOidc.enforced` and `ssoOidc.domain`
+      // keys are no longer part of the auth-config shape.
+    })
+    .strict()
+    .optional(),
+  twoFactor: z
+    .object({
+      required: z.boolean().optional(),
+    })
+    .strict()
+    .optional(),
+})
+
+export type UpdateAuthConfigActionInput = z.infer<typeof updateAuthConfigSchema>
+
+export const updateAuthConfigFn = createServerFn({ method: 'POST' })
+  .inputValidator(updateAuthConfigSchema)
+  .handler(async ({ data }) => {
+    console.log(`[fn:settings] updateAuthConfigFn`)
+    try {
+      await requireAuth({ roles: ['admin'] })
+      const { updateAuthConfig } = await import('@/lib/server/domains/settings/settings.service')
+      return await updateAuthConfig(data as Parameters<typeof updateAuthConfig>[0])
+    } catch (error) {
+      console.error(`[fn:settings] updateAuthConfigFn failed:`, error)
       throw error
     }
   })

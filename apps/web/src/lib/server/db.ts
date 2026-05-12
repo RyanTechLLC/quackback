@@ -120,6 +120,8 @@ export {
   sessionRelations,
   settings,
   settingsRelations,
+  ssoVerifiedDomain,
+  twoFactor,
   user,
   userRelations,
   verification,
