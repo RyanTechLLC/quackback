@@ -26,7 +26,7 @@ import {
   getTenantSettings,
 } from '@/lib/server/domains/settings/settings.service'
 import { emailDomain } from '@/lib/server/auth/normalize-domain'
-import type { VerifiedDomain } from '@/lib/server/domains/settings/settings.types'
+import type { AuthConfig, VerifiedDomain } from '@/lib/server/domains/settings/settings.types'
 
 export type AuthProvider = 'email' | 'credential' | 'magic-link' | 'sso' | string
 export type Role = 'admin' | 'member' | 'user'
@@ -170,6 +170,10 @@ const HARD_BOUND_PROVIDERS = new Set<AuthProvider>(['credential', 'magic-link'])
  * Policy predicate: this provider's sign-in must be rejected for this
  * email because the email's verified-domain row has `enforced=true`.
  * Without enforcement, verification is routing-only.
+ *
+ * @deprecated Use {@link isHardBound} — it also handles the workspace-
+ * wide `ssoOidc.required` branch. Retained for backwards compatibility
+ * with call sites that don't yet have role + authConfig in hand.
  */
 export function isHardBoundByVerifiedDomain(
   provider: AuthProvider,
@@ -177,6 +181,47 @@ export function isHardBoundByVerifiedDomain(
   verifiedDomains: readonly VerifiedDomain[] | undefined
 ): boolean {
   if (!HARD_BOUND_PROVIDERS.has(provider)) return false
+  const match = findVerifiedDomainForEmail(email, verifiedDomains)
+  return match?.enforced === true
+}
+
+/**
+ * Unified hard-binding predicate. Returns true when the sign-in attempt
+ * must be rejected because of:
+ *
+ *  - the per-domain `sso_verified_domain.enforced` flag (per-domain branch), OR
+ *  - the workspace-wide `authConfig.ssoOidc.required` flag, which binds
+ *    every admin/member regardless of email domain.
+ *
+ * Magic-link can escape the workspace-wide branch when
+ * `allowMagicLinkUnderRequired` is set — operators who want to keep a
+ * cross-IdP break-glass.
+ *
+ * Portal users (role='user') are never bound by the workspace-wide
+ * branch — they're not gated by SSO at all. The per-domain branch
+ * still applies because that's email-driven, not role-driven.
+ */
+export function isHardBound(
+  provider: AuthProvider,
+  email: string | null | undefined,
+  role: Role,
+  authConfig: AuthConfig | undefined,
+  verifiedDomains: readonly VerifiedDomain[] | undefined
+): boolean {
+  if (!HARD_BOUND_PROVIDERS.has(provider)) return false
+
+  const sso = authConfig?.ssoOidc
+  const isTeamRole = role === 'admin' || role === 'member'
+  if (isTeamRole && sso?.required === true) {
+    // Magic-link escape: only when explicitly opted into.
+    if (provider === 'magic-link' && sso.allowMagicLinkUnderRequired === true) {
+      // Workspace-wide branch doesn't bind, but a per-domain enforced
+      // row still might — fall through.
+    } else {
+      return true
+    }
+  }
+
   const match = findVerifiedDomainForEmail(email, verifiedDomains)
   return match?.enforced === true
 }
