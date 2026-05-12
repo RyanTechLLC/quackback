@@ -42,6 +42,7 @@ import { rehostExternalImages } from '@/lib/server/content/rehost-images'
 import { subscribeToPost } from '@/lib/server/domains/subscriptions/subscription.service'
 import type { CreatePostInput, UpdatePostInput, CreatePostResult } from './post.types'
 import { createActivity } from '@/lib/server/domains/activity/activity.service'
+import { canCreatePost, ANONYMOUS_ACTOR, type Actor } from '@/lib/server/policy'
 
 /**
  * Create a new post
@@ -65,6 +66,7 @@ export async function createPost(
     name?: string
     email?: string
     displayName?: string
+    actor?: Actor
   },
   options?: { skipDispatch?: boolean }
 ): Promise<CreatePostResult> {
@@ -119,6 +121,20 @@ export async function createPost(
     throw new NotFoundError('BOARD_NOT_FOUND', `Board with ID ${input.boardId} not found`)
   }
 
+  // Per-board moderation gate. Submissions on boards with requireApproval
+  // matching the submitter category land in 'pending' instead of 'published'.
+  // Trusted-segment members + team always bypass.
+  const createDecision = canCreatePost(author.actor ?? ANONYMOUS_ACTOR, {
+    audience: board.audience,
+    moderation: board.moderation,
+  })
+  if (!createDecision.allowed) {
+    throw new ValidationError('POST_CREATE_DENIED', createDecision.reason)
+  }
+  const moderationState: 'published' | 'pending' = createDecision.requiresApproval
+    ? 'pending'
+    : 'published'
+
   // Determine statusId - either from input or use default "open" status
   let statusId = input.statusId
   if (!statusId) {
@@ -155,6 +171,7 @@ export async function createPost(
         principalId: author.principalId,
         widgetMetadata: input.widgetMetadata ?? null,
         voteCount: 1,
+        moderationState,
         ...(input.createdAt && { createdAt: input.createdAt }),
       })
       .returning()

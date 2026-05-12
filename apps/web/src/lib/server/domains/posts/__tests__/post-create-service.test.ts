@@ -44,9 +44,13 @@ vi.mock('@/lib/server/db', async () => {
     db: {
       query: {
         boards: {
-          findFirst: vi
-            .fn()
-            .mockResolvedValue({ id: 'board_b', slug: 'feedback', name: 'Feedback' }),
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'board_b',
+            slug: 'feedback',
+            name: 'Feedback',
+            audience: { kind: 'public' },
+            moderation: { requireApproval: 'none', trustedSegmentIds: [] },
+          }),
         },
         postStatuses: {
           findFirst: vi.fn().mockResolvedValue({ id: 'status_open', name: 'Open' }),
