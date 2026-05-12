@@ -14,7 +14,7 @@ import { createServerFn } from '@tanstack/react-start'
 import type { UserId } from '@quackback/ids'
 import { z } from 'zod'
 import { and, db, eq, like, twoFactor, user, verification } from '@/lib/server/db'
-import { recordAuditEvent } from '@/lib/server/audit/log'
+import { actorFromAuth, recordAuditEvent } from '@/lib/server/audit/log'
 import { requireAuth } from './auth-helpers'
 
 const input = z.object({
@@ -41,11 +41,7 @@ export const adminResetTwoFactorFn = createServerFn({ method: 'POST' })
     await recordAuditEvent({
       event: 'two_factor.reset_by_admin',
       outcome: 'success',
-      actor: {
-        userId: auth.user.id,
-        email: auth.user.email,
-        role: auth.principal.role,
-      },
+      actor: actorFromAuth(auth),
       target: { type: 'user', id: userId },
     })
 

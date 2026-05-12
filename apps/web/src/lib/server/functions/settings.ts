@@ -29,7 +29,7 @@ import {
   updateCustomCss,
 } from '@/lib/server/domains/settings/settings.media'
 import { getPublicUrlOrNull } from '@/lib/server/storage/s3'
-import { recordAuditEvent, type AuditEventType } from '@/lib/server/audit/log'
+import { actorFromAuth, recordAuditEvent, type AuditEventType } from '@/lib/server/audit/log'
 import { requireAuth } from './auth-helpers'
 import { getSession } from '@/lib/server/auth/session'
 import { db, principal, user, invitation, account, eq, ne, and } from '@/lib/server/db'
@@ -356,7 +356,7 @@ export const updateAuthConfigFn = createServerFn({ method: 'POST' })
     console.log(`[fn:settings] updateAuthConfigFn`)
     try {
       const auth = await requireAuth({ roles: ['admin'] })
-      const actor = { userId: auth.user.id, email: auth.user.email, role: auth.principal.role }
+      const actor = actorFromAuth(auth)
 
       const { updateAuthConfig, getAuthConfig } =
         await import('@/lib/server/domains/settings/settings.service')

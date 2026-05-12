@@ -15,9 +15,8 @@ import { z } from 'zod'
 import type { UserId } from '@quackback/ids'
 import { and, auditLog, db, desc, eq, gte, lte } from '@/lib/server/db'
 import type { SQL } from 'drizzle-orm'
+import type { AuditEventOutcome, JsonValue } from '@/lib/server/audit/log'
 import { requireAuth } from './auth-helpers'
-
-type JsonValue = string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[]
 
 const DEFAULT_LIMIT = 100
 const MAX_LIMIT = 500
@@ -42,7 +41,7 @@ export type AuditEventRow = {
   actorIp: string | null
   actorUserAgent: string | null
   eventType: string
-  eventOutcome: string
+  eventOutcome: AuditEventOutcome
   targetType: string | null
   targetId: string | null
   beforeValue: JsonValue | null
@@ -66,31 +65,28 @@ export const listAuditEventsFn = createServerFn({ method: 'GET' })
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined
 
-    const rows = (await db
+    const rows = await db
       .select()
       .from(auditLog)
       .where(whereClause)
       .orderBy(desc(auditLog.occurredAt))
-      .limit(lookahead)) as Array<Record<string, unknown>>
+      .limit(lookahead)
 
     const hasMore = rows.length > requested
     const visible = hasMore ? rows.slice(0, requested) : rows
 
     const events: AuditEventRow[] = visible.map((row) => ({
-      id: String(row.id ?? ''),
-      occurredAt:
-        row.occurredAt instanceof Date
-          ? row.occurredAt.toISOString()
-          : String(row.occurredAt ?? ''),
-      actorUserId: (row.actorUserId as string | null) ?? null,
-      actorEmail: (row.actorEmail as string | null) ?? null,
-      actorRole: (row.actorRole as string | null) ?? null,
-      actorIp: (row.actorIp as string | null) ?? null,
-      actorUserAgent: (row.actorUserAgent as string | null) ?? null,
-      eventType: String(row.eventType ?? ''),
-      eventOutcome: String(row.eventOutcome ?? ''),
-      targetType: (row.targetType as string | null) ?? null,
-      targetId: (row.targetId as string | null) ?? null,
+      id: row.id,
+      occurredAt: row.occurredAt.toISOString(),
+      actorUserId: row.actorUserId,
+      actorEmail: row.actorEmail,
+      actorRole: row.actorRole,
+      actorIp: row.actorIp,
+      actorUserAgent: row.actorUserAgent,
+      eventType: row.eventType,
+      eventOutcome: row.eventOutcome as AuditEventOutcome,
+      targetType: row.targetType,
+      targetId: row.targetId,
       beforeValue: (row.beforeValue as JsonValue | null) ?? null,
       afterValue: (row.afterValue as JsonValue | null) ?? null,
       metadata: (row.metadata as JsonValue | null) ?? null,

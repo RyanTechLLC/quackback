@@ -39,6 +39,11 @@ vi.mock('@/lib/server/functions/auth-helpers', () => ({
 
 vi.mock('@/lib/server/audit/log', () => ({
   recordAuditEvent: hoisted.mockRecordAuditEvent,
+  actorFromAuth: (auth: { user: { id: string; email: string }; principal: { role: string } }) => ({
+    userId: auth.user.id,
+    email: auth.user.email,
+    role: auth.principal.role,
+  }),
 }))
 
 vi.mock('@/lib/server/domains/settings/settings.service', () => ({

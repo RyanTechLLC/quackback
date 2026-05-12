@@ -43,6 +43,34 @@ vi.mock('@/lib/server/functions/auth-helpers', () => ({
 
 vi.mock('@/lib/server/audit/log', () => ({
   recordAuditEvent: hoisted.mockRecordAuditEvent,
+  actorFromAuth: (auth: { user: { id: string; email: string }; principal: { role: string } }) => ({
+    userId: auth.user.id,
+    email: auth.user.email,
+    role: auth.principal.role,
+  }),
+  withAuditEvent: async (
+    spec: { event: string; metadata?: Record<string, unknown>; [k: string]: unknown },
+    fn: () => Promise<unknown>
+  ) => {
+    try {
+      const result = await fn()
+      await hoisted.mockRecordAuditEvent({ ...spec, outcome: 'success' })
+      return result
+    } catch (error) {
+      const reason =
+        error && typeof error === 'object' && 'code' in error
+          ? String((error as { code: unknown }).code)
+          : error instanceof Error
+            ? error.message
+            : 'UNEXPECTED'
+      await hoisted.mockRecordAuditEvent({
+        ...spec,
+        outcome: 'failure',
+        metadata: { ...(spec.metadata ?? {}), reason },
+      })
+      throw error
+    }
+  },
 }))
 
 vi.mock('@/lib/server/domains/platform-credentials/platform-credential.service', () => ({

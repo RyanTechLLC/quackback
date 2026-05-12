@@ -28,7 +28,7 @@ import { z } from 'zod'
 import { ConflictError, ForbiddenError } from '@/lib/shared/errors'
 import { httpsUrl } from '@/lib/shared/schemas/auth'
 import { SSO_OAUTH_CALLBACK_PATH } from '@/lib/shared/sso-test-keys'
-import { recordAuditEvent } from '@/lib/server/audit/log'
+import { actorFromAuth, withAuditEvent } from '@/lib/server/audit/log'
 import { requireAuth } from './auth-helpers'
 
 const testSsoConnectionInput = z.object({
@@ -211,72 +211,57 @@ const setVerifiedDomainEnforcedInput = z.object({
 export const setVerifiedDomainEnforcedFn = createServerFn({ method: 'POST' })
   .inputValidator(setVerifiedDomainEnforcedInput)
   .handler(async ({ data }) => {
-    const { user, principal } = await requireAuth({ roles: ['admin'] })
+    const auth = await requireAuth({ roles: ['admin'] })
 
     const event = data.enforced
       ? 'sso.enforcement.domain.enabled'
       : 'sso.enforcement.domain.disabled'
-    const actor = { userId: user.id, email: user.email, role: principal.role }
-    const target = { type: 'sso_verified_domain', id: data.id }
 
     const { setVerifiedDomainEnforced, listVerifiedDomains } =
       await import('@/lib/server/domains/settings/settings.service')
 
-    // Snapshot the prior `enforced` value for the audit row.
+    // Snapshot the prior `enforced` value for the audit row. The full
+    // list is small (≤ MAX_VERIFIED_DOMAINS) and the values are cached
+    // upstream, so a list read is cheaper than a second targeted query.
     const priorRows = await listVerifiedDomains()
     const prior = priorRows.find((row) => row.id === data.id)
     const before = prior ? { enforced: prior.enforced } : null
 
-    try {
-      if (data.enforced) {
-        const { db, principal: principalTable, eq } = await import('@/lib/server/db')
-        const principalRow = await db.query.principal.findFirst({
-          where: eq(principalTable.userId, user.id),
-          columns: { lastSsoSignInAt: true },
-        })
-        const last = principalRow?.lastSsoSignInAt
-        if (!last || last.getTime() < Date.now() - SSO_BOOTSTRAP_WINDOW_MS) {
-          throw new ForbiddenError(
-            'SSO_BOOTSTRAP_GUARD',
-            'Sign in via SSO first to enable enforcement.'
-          )
+    return withAuditEvent(
+      {
+        event,
+        actor: actorFromAuth(auth),
+        target: { type: 'sso_verified_domain', id: data.id },
+        before,
+        after: { enforced: data.enforced },
+      },
+      async () => {
+        if (data.enforced) {
+          const { db, principal: principalTable, eq } = await import('@/lib/server/db')
+          const principalRow = await db.query.principal.findFirst({
+            where: eq(principalTable.userId, auth.user.id),
+            columns: { lastSsoSignInAt: true },
+          })
+          const last = principalRow?.lastSsoSignInAt
+          if (!last || last.getTime() < Date.now() - SSO_BOOTSTRAP_WINDOW_MS) {
+            throw new ForbiddenError(
+              'SSO_BOOTSTRAP_GUARD',
+              'Sign in via SSO first to enable enforcement.'
+            )
+          }
+
+          const { isEmailConfigured } = await import('@quackback/email')
+          if (!isEmailConfigured()) {
+            throw new ConflictError(
+              'SSO_NO_BREAKGLASS',
+              'Configure email delivery (SMTP/Resend) before requiring SSO. Magic-link is the only fallback when SSO breaks.'
+            )
+          }
         }
 
-        const { isEmailConfigured } = await import('@quackback/email')
-        if (!isEmailConfigured()) {
-          throw new ConflictError(
-            'SSO_NO_BREAKGLASS',
-            'Configure email delivery (SMTP/Resend) before requiring SSO. Magic-link is the only fallback when SSO breaks.'
-          )
-        }
+        return setVerifiedDomainEnforced(data.id, data.enforced)
       }
-
-      const updated = await setVerifiedDomainEnforced(data.id, data.enforced)
-      await recordAuditEvent({
-        event,
-        outcome: 'success',
-        actor,
-        target,
-        before,
-        after: { enforced: data.enforced },
-      })
-      return updated
-    } catch (error) {
-      const reason =
-        error instanceof ForbiddenError || error instanceof ConflictError
-          ? error.code
-          : 'UNEXPECTED'
-      await recordAuditEvent({
-        event,
-        outcome: 'failure',
-        actor,
-        target,
-        before,
-        after: { enforced: data.enforced },
-        metadata: { reason },
-      })
-      throw error
-    }
+    )
   })
 
 /** Cache of the last discovery probe per URL. 60s TTL is enough to
@@ -409,37 +394,25 @@ export const setSsoClientSecretFn = createServerFn({ method: 'POST' })
   .inputValidator(setSsoClientSecretInput)
   .handler(async ({ data }) => {
     const auth = await requireAuth({ roles: ['admin'] })
-    const actor = { userId: auth.user.id, email: auth.user.email, role: auth.principal.role }
 
-    try {
-      const { savePlatformCredentials } =
-        await import('@/lib/server/domains/platform-credentials/platform-credential.service')
-      const { SSO_CREDENTIAL_TYPE } = await import('@/lib/server/auth/sso-secret')
-      await savePlatformCredentials({
-        integrationType: SSO_CREDENTIAL_TYPE,
-        credentials: { clientSecret: data.clientSecret.trim() },
-        principalId: auth.principal.id,
-      })
-      await recordAuditEvent({
+    return withAuditEvent(
+      {
         event: 'sso.config.changed',
-        outcome: 'success',
-        actor,
+        actor: actorFromAuth(auth),
         metadata: { field: 'clientSecret', action: 'set' },
-      })
-      return { success: true }
-    } catch (error) {
-      await recordAuditEvent({
-        event: 'sso.config.changed',
-        outcome: 'failure',
-        actor,
-        metadata: {
-          field: 'clientSecret',
-          action: 'set',
-          reason: error instanceof Error ? error.message : 'UNEXPECTED',
-        },
-      })
-      throw error
-    }
+      },
+      async () => {
+        const { savePlatformCredentials } =
+          await import('@/lib/server/domains/platform-credentials/platform-credential.service')
+        const { SSO_CREDENTIAL_TYPE } = await import('@/lib/server/auth/sso-secret')
+        await savePlatformCredentials({
+          integrationType: SSO_CREDENTIAL_TYPE,
+          credentials: { clientSecret: data.clientSecret.trim() },
+          principalId: auth.principal.id,
+        })
+        return { success: true }
+      }
+    )
   })
 
 /**
@@ -449,59 +422,45 @@ export const setSsoClientSecretFn = createServerFn({ method: 'POST' })
  */
 export const clearSsoClientSecretFn = createServerFn({ method: 'POST' }).handler(async () => {
   const auth = await requireAuth({ roles: ['admin'] })
-  const actor = { userId: auth.user.id, email: auth.user.email, role: auth.principal.role }
 
-  try {
-    // Refuse to clear while any verified domain has enforcement on —
-    // clearing the secret skips SSO registration, and enforced-domain
-    // emails would have no working sign-in path. Refuse also when any
-    // domain is verified at all: those emails are routed to SSO by
-    // default; without the secret, the redirect would 4xx. Force the
-    // admin to explicitly remove the affected domains first.
-    const { getTenantSettings } = await import('@/lib/server/domains/settings/settings.service')
-    const tenant = await getTenantSettings()
-    const enforcedRow = tenant?.verifiedDomains.find((d) => d.enforced)
-    if (enforcedRow) {
-      const { ValidationError } = await import('@/lib/shared/errors')
-      throw new ValidationError(
-        'SSO_ENFORCEMENT_ACTIVE',
-        `Disable SSO enforcement on ${enforcedRow.name} before removing the client secret.`
-      )
-    }
-    const verifiedRow = tenant?.verifiedDomains.find((d) => d.verifiedAt !== null)
-    if (verifiedRow) {
-      const { ValidationError } = await import('@/lib/shared/errors')
-      throw new ValidationError(
-        'SSO_DOMAIN_VERIFIED',
-        `Remove the verified domain ${verifiedRow.name} before removing the client secret.`
-      )
-    }
-    const { deletePlatformCredentials } =
-      await import('@/lib/server/domains/platform-credentials/platform-credential.service')
-    const { SSO_CREDENTIAL_TYPE } = await import('@/lib/server/auth/sso-secret')
-    await deletePlatformCredentials(SSO_CREDENTIAL_TYPE)
-    await recordAuditEvent({
+  return withAuditEvent(
+    {
       event: 'sso.config.changed',
-      outcome: 'success',
-      actor,
+      actor: actorFromAuth(auth),
       metadata: { field: 'clientSecret', action: 'cleared' },
-    })
-    return { success: true }
-  } catch (error) {
-    const reason =
-      error && typeof error === 'object' && 'code' in error
-        ? String((error as { code: unknown }).code)
-        : error instanceof Error
-          ? error.message
-          : 'UNEXPECTED'
-    await recordAuditEvent({
-      event: 'sso.config.changed',
-      outcome: 'failure',
-      actor,
-      metadata: { field: 'clientSecret', action: 'cleared', reason },
-    })
-    throw error
-  }
+    },
+    async () => {
+      // Refuse to clear while any verified domain has enforcement on —
+      // clearing the secret skips SSO registration, and enforced-domain
+      // emails would have no working sign-in path. Refuse also when any
+      // domain is verified at all: those emails are routed to SSO by
+      // default; without the secret, the redirect would 4xx. Force the
+      // admin to explicitly remove the affected domains first.
+      const { getTenantSettings } = await import('@/lib/server/domains/settings/settings.service')
+      const tenant = await getTenantSettings()
+      const enforcedRow = tenant?.verifiedDomains.find((d) => d.enforced)
+      if (enforcedRow) {
+        const { ValidationError } = await import('@/lib/shared/errors')
+        throw new ValidationError(
+          'SSO_ENFORCEMENT_ACTIVE',
+          `Disable SSO enforcement on ${enforcedRow.name} before removing the client secret.`
+        )
+      }
+      const verifiedRow = tenant?.verifiedDomains.find((d) => d.verifiedAt !== null)
+      if (verifiedRow) {
+        const { ValidationError } = await import('@/lib/shared/errors')
+        throw new ValidationError(
+          'SSO_DOMAIN_VERIFIED',
+          `Remove the verified domain ${verifiedRow.name} before removing the client secret.`
+        )
+      }
+      const { deletePlatformCredentials } =
+        await import('@/lib/server/domains/platform-credentials/platform-credential.service')
+      const { SSO_CREDENTIAL_TYPE } = await import('@/lib/server/auth/sso-secret')
+      await deletePlatformCredentials(SSO_CREDENTIAL_TYPE)
+      return { success: true }
+    }
+  )
 })
 
 // =============================================================================

@@ -20,7 +20,7 @@ vi.mock('@/lib/server/db', () => ({
   auditLog: { __table: 'audit_log' },
 }))
 
-const { recordAuditEvent } = await import('../log')
+const { recordAuditEvent, withAuditEvent, actorFromAuth } = await import('../log')
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -115,5 +115,86 @@ describe('recordAuditEvent', () => {
 
     const row = mockInsertValues.mock.calls[0][0]
     expect(row.actorUserId).toBeNull()
+  })
+})
+
+describe('actorFromAuth', () => {
+  it('maps requireAuth output into an AuditActor', () => {
+    const actor = actorFromAuth({
+      user: { id: 'user_admin1' as never, email: 'admin@example.com', name: 'A', image: null },
+      principal: { id: 'principal_admin1' as never, role: 'admin', type: 'user' },
+      settings: { id: 'workspace_1' as never, slug: 's', name: 'n', logoKey: null },
+    })
+
+    expect(actor).toEqual({
+      userId: 'user_admin1',
+      email: 'admin@example.com',
+      role: 'admin',
+    })
+  })
+})
+
+describe('withAuditEvent', () => {
+  it('records success and returns the mutation result', async () => {
+    const result = await withAuditEvent(
+      {
+        event: 'sso.config.changed',
+        actor: { email: 'a@b.com' },
+        metadata: { field: 'clientSecret' },
+      },
+      async () => ({ ok: true })
+    )
+
+    expect(result).toEqual({ ok: true })
+    expect(mockInsertValues).toHaveBeenCalledTimes(1)
+    expect(mockInsertValues.mock.calls[0][0].eventOutcome).toBe('success')
+  })
+
+  it('records failure with reason from error.code and rethrows', async () => {
+    class MyError extends Error {
+      code = 'SSO_DOMAIN_VERIFIED'
+    }
+
+    await expect(
+      withAuditEvent({ event: 'sso.config.changed', actor: { email: 'a@b.com' } }, async () => {
+        throw new MyError('boom')
+      })
+    ).rejects.toThrow('boom')
+
+    expect(mockInsertValues).toHaveBeenCalledTimes(1)
+    const row = mockInsertValues.mock.calls[0][0]
+    expect(row.eventOutcome).toBe('failure')
+    expect(row.metadata).toMatchObject({ reason: 'SSO_DOMAIN_VERIFIED' })
+  })
+
+  it('falls back to error message when no code is present', async () => {
+    await expect(
+      withAuditEvent({ event: 'sso.config.changed', actor: { email: 'a@b.com' } }, async () => {
+        throw new Error('plain failure')
+      })
+    ).rejects.toThrow('plain failure')
+
+    expect(mockInsertValues.mock.calls[0][0].metadata).toMatchObject({ reason: 'plain failure' })
+  })
+
+  it('preserves caller-supplied metadata on the failure event', async () => {
+    await expect(
+      withAuditEvent(
+        {
+          event: 'sso.config.changed',
+          actor: { email: 'a@b.com' },
+          metadata: { field: 'clientSecret', action: 'set' },
+        },
+        async () => {
+          throw new Error('boom')
+        }
+      )
+    ).rejects.toThrow('boom')
+
+    expect(mockInsertValues.mock.calls[0][0].metadata).toMatchObject({
+      field: 'clientSecret',
+      action: 'set',
+      reason: 'boom',
+    })
   })
 })

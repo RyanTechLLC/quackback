@@ -108,6 +108,36 @@ function rowsToCsv(rows: AuditEventRow[]): string {
   return lines.join('\n')
 }
 
+function ActorCell({ row }: { row: AuditEventRow }) {
+  if (!row.actorEmail) return <span className="text-muted-foreground">—</span>
+  return (
+    <>
+      {row.actorEmail}
+      {row.actorRole ? (
+        <span className="ml-1.5 text-muted-foreground">({row.actorRole})</span>
+      ) : null}
+    </>
+  )
+}
+
+function TargetCell({ row }: { row: AuditEventRow }) {
+  if (!row.targetType) return <span className="text-muted-foreground">—</span>
+  return (
+    <span>
+      <span className="text-muted-foreground">{row.targetType}</span>
+      {row.targetId ? <span className="ml-1 font-mono">{row.targetId}</span> : null}
+    </span>
+  )
+}
+
+function OutcomeBadge({ outcome }: { outcome: AuditEventRow['eventOutcome'] }) {
+  return (
+    <Badge variant={outcome === 'success' ? 'secondary' : 'destructive'} className="text-xs">
+      {outcome}
+    </Badge>
+  )
+}
+
 function downloadCsv(rows: AuditEventRow[]): void {
   const csv = rowsToCsv(rows)
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
@@ -203,30 +233,13 @@ export function AuditLogPage() {
                   </TableCell>
                   <TableCell className="font-mono text-xs">{row.eventType}</TableCell>
                   <TableCell className="text-xs">
-                    {row.actorEmail ?? <span className="text-muted-foreground">—</span>}
-                    {row.actorRole ? (
-                      <span className="ml-1.5 text-muted-foreground">({row.actorRole})</span>
-                    ) : null}
+                    <ActorCell row={row} />
                   </TableCell>
                   <TableCell className="text-xs">
-                    {row.targetType ? (
-                      <span>
-                        <span className="text-muted-foreground">{row.targetType}</span>
-                        {row.targetId ? (
-                          <span className="ml-1 font-mono">{row.targetId}</span>
-                        ) : null}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
+                    <TargetCell row={row} />
                   </TableCell>
                   <TableCell>
-                    <Badge
-                      variant={row.eventOutcome === 'success' ? 'secondary' : 'destructive'}
-                      className="text-xs"
-                    >
-                      {row.eventOutcome}
-                    </Badge>
+                    <OutcomeBadge outcome={row.eventOutcome} />
                   </TableCell>
                 </TableRow>
               ))

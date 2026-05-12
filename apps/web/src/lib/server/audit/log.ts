@@ -9,6 +9,17 @@
  */
 import { db, auditLog } from '@/lib/server/db'
 import type { UserId } from '@quackback/ids'
+import { getClientIp } from '@/lib/server/domains/api/rate-limit'
+import type { AuthContext } from '@/lib/server/functions/auth-helpers'
+
+/** A JSON-shaped value — fits into a Postgres jsonb column. */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: JsonValue }
+  | JsonValue[]
 
 /**
  * Closed taxonomy of audit event types.
@@ -56,37 +67,22 @@ export interface RecordAuditEventInput {
   event: AuditEventType
   outcome?: AuditEventOutcome
   actor: AuditActor
-  /** When passed, we extract IP from `x-forwarded-for` / `x-real-ip` and UA from `user-agent`. */
-  request?: Request | { ip?: string | null; userAgent?: string | null }
+  /** Optional Request — IP comes from `getClientIp`, UA from `user-agent`. */
+  request?: Request
   target?: AuditTarget
   before?: unknown
   after?: unknown
   metadata?: Record<string, unknown>
 }
 
-function extractIpAndUserAgent(request: RecordAuditEventInput['request']): {
-  ip: string | null
-  userAgent: string | null
-} {
-  if (!request) return { ip: null, userAgent: null }
-
-  if (request instanceof Request) {
-    const fwd = request.headers.get('x-forwarded-for')
-    const ip = fwd ? fwd.split(',')[0].trim() : request.headers.get('x-real-ip')
-    return {
-      ip: ip || null,
-      userAgent: request.headers.get('user-agent'),
-    }
-  }
-
-  return {
-    ip: request.ip ?? null,
-    userAgent: request.userAgent ?? null,
-  }
+/** Map a requireAuth() result onto the audit row's denormalised actor fields. */
+export function actorFromAuth(auth: AuthContext): AuditActor {
+  return { userId: auth.user.id, email: auth.user.email, role: auth.principal.role }
 }
 
 export async function recordAuditEvent(input: RecordAuditEventInput): Promise<void> {
-  const { ip, userAgent } = extractIpAndUserAgent(input.request)
+  const ip = input.request ? getClientIp(input.request) : null
+  const userAgent = input.request?.headers.get('user-agent') ?? null
 
   try {
     await db.insert(auditLog).values({
@@ -95,7 +91,7 @@ export async function recordAuditEvent(input: RecordAuditEventInput): Promise<vo
       actorUserId: input.actor.userId ?? null,
       actorEmail: input.actor.email ?? null,
       actorRole: input.actor.role ?? null,
-      actorIp: ip,
+      actorIp: ip === 'unknown' ? null : ip,
       actorUserAgent: userAgent,
       targetType: input.target?.type ?? null,
       targetId: input.target?.id ?? null,
@@ -105,5 +101,62 @@ export async function recordAuditEvent(input: RecordAuditEventInput): Promise<vo
     })
   } catch (error) {
     console.error('[audit] recordAuditEvent failed:', { event: input.event, error })
+  }
+}
+
+/**
+ * Wrap a mutation with success/failure audit-log emission. Records a
+ * success row on resolve and a failure row (with `reason` derived from
+ * the error's `code` or message) on throw, then rethrows the original
+ * error.
+ *
+ * Use for handlers that need symmetric success/failure trails —
+ * setVerifiedDomainEnforcedFn, set/clearSsoClientSecretFn, etc.
+ * For success-only audits (admin reset 2FA, generate codes) call
+ * `recordAuditEvent` directly after the mutation succeeds.
+ */
+export async function withAuditEvent<T>(
+  spec: {
+    event: AuditEventType
+    actor: AuditActor
+    target?: AuditTarget
+    before?: unknown
+    after?: unknown
+    metadata?: Record<string, unknown>
+    request?: Request
+  },
+  mutation: () => Promise<T>
+): Promise<T> {
+  try {
+    const result = await mutation()
+    await recordAuditEvent({
+      event: spec.event,
+      outcome: 'success',
+      actor: spec.actor,
+      target: spec.target,
+      before: spec.before,
+      after: spec.after,
+      metadata: spec.metadata,
+      request: spec.request,
+    })
+    return result
+  } catch (error) {
+    const reason =
+      error && typeof error === 'object' && 'code' in error
+        ? String((error as { code: unknown }).code)
+        : error instanceof Error
+          ? error.message
+          : 'UNEXPECTED'
+    await recordAuditEvent({
+      event: spec.event,
+      outcome: 'failure',
+      actor: spec.actor,
+      target: spec.target,
+      before: spec.before,
+      after: spec.after,
+      metadata: { ...(spec.metadata ?? {}), reason },
+      request: spec.request,
+    })
+    throw error
   }
 }
