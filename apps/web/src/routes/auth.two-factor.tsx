@@ -7,8 +7,18 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp'
 import { authClient } from '@/lib/client/auth-client'
+import { clearTwoFactorCallbackUrl, resolveTwoFactorDest } from '@/lib/server/auth/client'
 
+// Accept both casings: Better-Auth's own convention is `callbackURL`
+// (matches the `signIn.email({ callbackURL })` option name), but older
+// callers and our own login forms historically used `callbackUrl`. The
+// resolver picks whichever is set and falls through to `/`. We also
+// honour a sessionStorage stash that the twoFactorClient's redirect
+// handler reads on the login → 2FA-challenge hop, since Better-Auth's
+// own redirect doesn't forward the original `callbackURL` field
+// (verified against `node_modules/.bun/better-auth@1.6.5/.../two-factor/client.mjs`).
 const searchSchema = z.object({
+  callbackURL: z.string().optional(),
   callbackUrl: z.string().optional(),
 })
 
@@ -34,8 +44,11 @@ function TwoFactorPage() {
         ? await authClient.twoFactor.verifyBackupCode({ code: value })
         : await authClient.twoFactor.verifyTotp({ code: value })
       if (betterErr) throw new Error(betterErr.message ?? 'Code rejected.')
-      const dest =
-        search.callbackUrl && search.callbackUrl.startsWith('/') ? search.callbackUrl : '/'
+      const dest = resolveTwoFactorDest(search)
+      // Clear the stash on every successful challenge — the login form
+      // set it expecting this exact navigation, no reason to keep it
+      // around (next sign-in will set its own).
+      clearTwoFactorCallbackUrl()
       void navigate({ to: dest })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Code rejected.')

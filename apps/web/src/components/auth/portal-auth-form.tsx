@@ -11,6 +11,7 @@ import {
   ArrowLeftIcon,
 } from '@heroicons/react/24/solid'
 import { authClient } from '@/lib/client/auth-client'
+import { stashTwoFactorCallbackUrl } from '@/lib/server/auth/client'
 import { OtpCodeStep } from './otp-code-step'
 import { useEmailSignin } from './use-email-signin'
 import type { AuthFormStep } from './email-signin-types'
@@ -133,6 +134,10 @@ export function PortalAuthForm({
           throw new Error(result.error.message || 'Failed to create account')
         }
       } else {
+        // Stash the post-auth destination so the twoFactor client can
+        // splice it onto its `/auth/two-factor` redirect if the user
+        // gets challenged (Better-Auth's own redirect drops it).
+        stashTwoFactorCallbackUrl(callbackUrl)
         const result = await authClient.signIn.email({
           email,
           password,

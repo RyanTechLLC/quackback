@@ -9,6 +9,89 @@ import {
 } from 'better-auth/client/plugins'
 
 /**
+ * sessionStorage key for the post-2FA destination URL.
+ *
+ * Better-Auth's twoFactor plugin server returns `{ twoFactorRedirect: true }`
+ * but does NOT echo back the request's `callbackURL` field (verified
+ * against `node_modules/.bun/better-auth@1.6.5/.../two-factor/index.mjs`
+ * line ~256, which returns only `twoFactorRedirect` + `twoFactorMethods`).
+ * Likewise the client-side `onTwoFactorRedirect` hook only sees
+ * `{ twoFactorMethods }` (see `client.d.mts` in the same package). The
+ * original request body is invisible to both.
+ *
+ * So login forms stash the desired post-auth destination here before
+ * calling `signIn.email`. The twoFactorClient redirect handler reads it
+ * and forwards as `?callbackURL=` on the `/auth/two-factor` URL; the
+ * route then consumes that param (with a `/`-prefix safety check) on
+ * successful verification and clears the key.
+ */
+export const TWO_FACTOR_CALLBACK_STORAGE_KEY = 'quackback:auth.callback-url'
+
+/**
+ * Best-effort SSR-safe stash for the callback URL — silently no-ops on
+ * the server and when sessionStorage is unavailable (private mode in
+ * some browsers).
+ */
+/**
+ * Same-origin safety check: `/`-prefixed AND not protocol-relative
+ * (`//evil.com/x` would otherwise look local). Used by every
+ * callback-URL handler in this module so the rule lives in one place.
+ */
+function isSafeCallbackUrl(url: unknown): url is string {
+  return typeof url === 'string' && url.length > 0 && url.startsWith('/') && !url.startsWith('//')
+}
+
+export function stashTwoFactorCallbackUrl(url: string | undefined): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (isSafeCallbackUrl(url)) {
+      window.sessionStorage.setItem(TWO_FACTOR_CALLBACK_STORAGE_KEY, url)
+    } else {
+      window.sessionStorage.removeItem(TWO_FACTOR_CALLBACK_STORAGE_KEY)
+    }
+  } catch {
+    /* sessionStorage disabled — fall back to the route default. */
+  }
+}
+
+function readTwoFactorCallbackUrl(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const value = window.sessionStorage.getItem(TWO_FACTOR_CALLBACK_STORAGE_KEY)
+    return isSafeCallbackUrl(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
+export function clearTwoFactorCallbackUrl(): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.removeItem(TWO_FACTOR_CALLBACK_STORAGE_KEY)
+  } catch {
+    /* nothing to clear */
+  }
+}
+
+/**
+ * Resolve the post-2FA destination from the route's search params.
+ *
+ * Accepts both `callbackURL` (Better-Auth convention, matches
+ * `signIn.email({ callbackURL })`) and the legacy `callbackUrl` so
+ * existing links keep working. Returns the first same-origin candidate
+ * — see `isSafeCallbackUrl` above — so a poisoned link can't bounce
+ * the user offsite.
+ */
+export function resolveTwoFactorDest(
+  search: { callbackURL?: string; callbackUrl?: string } | undefined
+): string {
+  if (!search) return '/'
+  if (isSafeCallbackUrl(search.callbackURL)) return search.callbackURL
+  if (isSafeCallbackUrl(search.callbackUrl)) return search.callbackUrl
+  return '/'
+}
+
+/**
  * Better-auth client for client-side authentication
  * Used in React components for auth actions
  *
@@ -27,7 +110,19 @@ export const authClient = createAuthClient({
     magicLinkClient(),
     oneTimeTokenClient(),
     twoFactorClient({
-      twoFactorPage: '/auth/two-factor',
+      // We register `onTwoFactorRedirect` instead of `twoFactorPage` so
+      // we can splice the stashed callbackURL onto the destination —
+      // Better-Auth's built-in handler hard-codes the URL with no
+      // query-string. Falls back to `/auth/two-factor` with no params
+      // when nothing's stashed.
+      onTwoFactorRedirect: () => {
+        if (typeof window === 'undefined') return
+        const stashed = readTwoFactorCallbackUrl()
+        const dest = stashed
+          ? `/auth/two-factor?callbackURL=${encodeURIComponent(stashed)}`
+          : '/auth/two-factor'
+        window.location.href = dest
+      },
     }),
   ],
 })

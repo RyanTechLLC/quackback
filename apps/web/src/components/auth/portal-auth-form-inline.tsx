@@ -18,6 +18,7 @@ import {
 } from '@/components/auth/oauth-buttons'
 import { openAuthPopup, usePopupTracker } from '@/lib/client/hooks/use-auth-broadcast'
 import { authClient } from '@/lib/client/auth-client'
+import { stashTwoFactorCallbackUrl } from '@/lib/server/auth/client'
 import { lookupAuthMethodsFn, SSO_UNAVAILABLE_MESSAGE } from '@/lib/server/functions/auth'
 import { OtpCodeStep } from './otp-code-step'
 import { useEmailSignin } from './use-email-signin'
@@ -279,6 +280,12 @@ export function PortalAuthFormInline({
           throw new Error(result.error.message || 'Failed to create account')
         }
       } else {
+        // Stash the current page so the twoFactor client can splice it
+        // onto its `/auth/two-factor` redirect — the inline form lives
+        // inside a popover, so on challenge we want to land back here.
+        if (typeof window !== 'undefined') {
+          stashTwoFactorCallbackUrl(window.location.pathname + window.location.search)
+        }
         const result = await authClient.signIn.email({
           email,
           password,
