@@ -63,6 +63,28 @@ export interface AuthConfig {
      * disabled on the same call that enables workspace-wide require.
      */
     allowMagicLinkUnderRequired?: boolean
+    /**
+     * Optional IdP-attribute → role mapping. When set, the SSO callback
+     * resolves the user's role from a claim on the ID token instead of
+     * falling back to `autoProvisionRole`. The mapping is first-match-
+     * wins against `rules`; nothing matches → `defaultRole`.
+     *
+     * Resolved on every sign-in when `syncOnEverySignIn=true` so role
+     * changes in the IdP propagate down. Default `false` keeps JIT
+     * semantics (only first sign-in sets the role).
+     */
+    attributeMapping?: {
+      /** Dotted path or URL-shaped namespaced claim path on the ID token. */
+      claimPath: string
+      /** First-match-wins. `whenContains` matches when the resolved claim's
+       *  array contains the literal (case-insensitive) or its scalar value
+       *  equals it. */
+      rules: Array<{ whenContains: string; role: 'admin' | 'member' | 'user' }>
+      /** Used when no rule matches. */
+      defaultRole: 'admin' | 'member' | 'user'
+      /** When true, every sign-in re-resolves and may demote/promote. */
+      syncOnEverySignIn?: boolean
+    }
   }
   /**
    * Workspace-wide two-factor policy for team-role users.
