@@ -83,15 +83,26 @@ function useDebounced<T>(value: T, ms: number): T {
   return debounced
 }
 
-function formatTimestamp(iso: string): string {
-  const date = new Date(iso)
-  return date.toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+/**
+ * Two-line timestamp: "May 13" above "12:48 AM". Keeps the When
+ * column narrow without forcing the date string to wrap mid-word
+ * when the table is squeezed by long target IDs. Year is omitted —
+ * audit-log retention caps at 365 days by default so every row is
+ * within the current year.
+ */
+function formatTimestamp(iso: string): { date: string; time: string; full: string } {
+  const d = new Date(iso)
+  return {
+    date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    time: d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+    full: d.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }),
+  }
 }
 
 function rowsToCsv(rows: AuditEventRow[]): string {
@@ -135,22 +146,37 @@ function rowsToCsv(rows: AuditEventRow[]): string {
 function ActorCell({ row }: { row: AuditEventRow }) {
   if (!row.actorEmail) return <span className="text-muted-foreground">—</span>
   return (
-    <>
-      {row.actorEmail}
+    <div className="flex flex-col">
+      <span className="truncate">{row.actorEmail}</span>
       {row.actorRole ? (
-        <span className="ml-1.5 text-muted-foreground">({row.actorRole})</span>
+        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+          {row.actorRole}
+        </span>
       ) : null}
-    </>
+    </div>
   )
 }
 
+/**
+ * Target cell: the type sits on the top line as a label and the ID
+ * goes on a second line in monospace, truncated with a tooltip for
+ * the full value. Stacking is what stops the long
+ * `domain_01krf77nfbf23v3dmx5ztdjkzr` string from blowing out the
+ * row width.
+ */
 function TargetCell({ row }: { row: AuditEventRow }) {
   if (!row.targetType) return <span className="text-muted-foreground">—</span>
   return (
-    <span>
-      <span className="text-muted-foreground">{row.targetType}</span>
-      {row.targetId ? <span className="ml-1 font-mono">{row.targetId}</span> : null}
-    </span>
+    <div className="flex flex-col">
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        {row.targetType}
+      </span>
+      {row.targetId ? (
+        <span className="truncate font-mono text-[11px]" title={row.targetId}>
+          {row.targetId}
+        </span>
+      ) : null}
+    </div>
   )
 }
 
@@ -244,42 +270,59 @@ export function AuditLogPage() {
         </Button>
       </div>
 
-      <div className="rounded-md border">
-        <Table>
+      {/* `overflow-x-auto` so the table can scroll horizontally when
+       *  the viewport is narrower than the natural column widths,
+       *  rather than wrapping each cell into a stack of single-word
+       *  lines. `table-fixed` with explicit widths gives the
+       *  browser something to lay out against — without it the
+       *  longest target ID dictates column distribution. */}
+      <div className="overflow-x-auto rounded-md border">
+        <Table className="table-fixed text-xs">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-44">When</TableHead>
-              <TableHead>Event</TableHead>
-              <TableHead>Actor</TableHead>
-              <TableHead>Target</TableHead>
-              <TableHead className="w-24">Outcome</TableHead>
+              <TableHead className="w-[7rem]">When</TableHead>
+              <TableHead className="w-[18rem]">Event</TableHead>
+              <TableHead className="w-[16rem]">Actor</TableHead>
+              <TableHead className="w-[18rem]">Target</TableHead>
+              <TableHead className="w-[5rem]">Outcome</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-8 text-center text-xs text-muted-foreground">
+                <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
                   No audit events match these filters yet.
                 </TableCell>
               </TableRow>
             ) : (
-              rows.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {formatTimestamp(row.occurredAt)}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{row.eventType}</TableCell>
-                  <TableCell className="text-xs">
-                    <ActorCell row={row} />
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    <TargetCell row={row} />
-                  </TableCell>
-                  <TableCell>
-                    <OutcomeBadge outcome={row.eventOutcome} />
-                  </TableCell>
-                </TableRow>
-              ))
+              rows.map((row) => {
+                const stamp = formatTimestamp(row.occurredAt)
+                return (
+                  <TableRow key={row.id}>
+                    <TableCell
+                      className="whitespace-nowrap text-muted-foreground"
+                      title={stamp.full}
+                    >
+                      <div className="flex flex-col leading-tight">
+                        <span>{stamp.date}</span>
+                        <span className="text-[10px]">{stamp.time}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="truncate font-mono" title={row.eventType}>
+                      {row.eventType}
+                    </TableCell>
+                    <TableCell className="truncate">
+                      <ActorCell row={row} />
+                    </TableCell>
+                    <TableCell>
+                      <TargetCell row={row} />
+                    </TableCell>
+                    <TableCell>
+                      <OutcomeBadge outcome={row.eventOutcome} />
+                    </TableCell>
+                  </TableRow>
+                )
+              })
             )}
           </TableBody>
         </Table>

@@ -120,7 +120,7 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
       .groupBy(session.userId)
       .as('last_session')
 
-    const teamMembers = await db
+    const rawMembers = await db
       .select({
         id: principal.id,
         userId: user.id,
@@ -129,14 +129,25 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
         image: user.image,
         role: principal.role,
         createdAt: principal.createdAt,
-        lastSignInAt: sql<Date | null>`${lastSession.lastSignInAt}`,
+        lastSignInAt: sql<Date | string | null>`${lastSession.lastSignInAt}`,
       })
       .from(principal)
       .innerJoin(user, eq(principal.userId, user.id))
       .leftJoin(lastSession, eq(lastSession.userId, user.id))
       .where(eq(principal.type, 'user'))
 
-    return teamMembers
+    // The `max()` aggregate comes back as a string from postgres-js
+    // (the Date mapping only fires on plain timestamp column selects),
+    // so we accept both shapes and normalise to a real Date.
+    return rawMembers.map((m) => ({
+      ...m,
+      lastSignInAt:
+        m.lastSignInAt instanceof Date
+          ? m.lastSignInAt
+          : typeof m.lastSignInAt === 'string'
+            ? new Date(m.lastSignInAt)
+            : null,
+    }))
   } catch (error) {
     console.error('Error listing team members:', error)
     throw new InternalError('DATABASE_ERROR', 'Failed to list team members', error)

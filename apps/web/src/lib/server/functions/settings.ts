@@ -156,13 +156,19 @@ export const fetchTeamMembersAndInvitations = createServerFn({ method: 'GET' }).
         .leftJoin(lastSession, eq(lastSession.userId, user.id))
         .where(ne(principal.role, 'user'))
 
-      // Serialise Date → ISO string on the boundary so the client
-      // type stays narrow (`string | null`). TanStack Start auto-
-      // serialises Dates anyway, but typing it explicitly avoids the
-      // Date/string mismatch in the consumer.
+      // Serialise to ISO string on the boundary so the client type
+      // stays narrow (`string | null`). The aggregate `max()` comes
+      // back as a string from postgres-js (not a Date — that mapping
+      // only fires on plain timestamp column selects), so we accept
+      // either and normalise.
       const members = membersRaw.map((m) => ({
         ...m,
-        lastSignInAt: m.lastSignInAt ? m.lastSignInAt.toISOString() : null,
+        lastSignInAt:
+          m.lastSignInAt instanceof Date
+            ? m.lastSignInAt.toISOString()
+            : typeof m.lastSignInAt === 'string'
+              ? new Date(m.lastSignInAt).toISOString()
+              : null,
       }))
 
       const pendingInvitations = await db.query.invitation.findMany({
