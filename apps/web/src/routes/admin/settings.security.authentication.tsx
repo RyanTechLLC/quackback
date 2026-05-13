@@ -7,7 +7,6 @@ import { ShieldCheckIcon } from '@heroicons/react/24/solid'
 import { BackLink } from '@/components/ui/back-link'
 import { PageHeader } from '@/components/shared/page-header'
 import { AuthSettings, type AuthTab } from '@/components/admin/settings/security/auth-settings'
-import { RecoveryCodesSection } from '@/components/admin/settings/security/sso/recovery-codes-section'
 import { DEFAULT_PORTAL_CONFIG } from '@/lib/shared/types/settings'
 
 const searchSchema = z.object({
@@ -22,14 +21,12 @@ export const Route = createFileRoute('/admin/settings/security/authentication')(
 
     const { queryClient } = context
     // Both tabs are loaded up front so switching tabs doesn't trigger
-    // a server round-trip. Auth config + portal config + SSO status +
-    // provider credential status are cheap (settings cache hits).
+    // a server round-trip. Auth config + portal config + provider
+    // credential status are cheap (settings cache hits).
     await Promise.all([
       queryClient.ensureQueryData(settingsQueries.authConfig()),
       queryClient.ensureQueryData(settingsQueries.portalConfig()),
       queryClient.ensureQueryData(adminQueries.authProviderStatus()),
-      queryClient.ensureQueryData(adminQueries.ssoStatus()),
-      queryClient.ensureQueryData(adminQueries.recoveryCodes()),
     ])
 
     return {}
@@ -44,7 +41,6 @@ function AuthenticationPage() {
   const authConfigQuery = useSuspenseQuery(settingsQueries.authConfig())
   const portalConfigQuery = useSuspenseQuery(settingsQueries.portalConfig())
   const credentialStatusQuery = useSuspenseQuery(adminQueries.authProviderStatus())
-  const ssoStatusQuery = useSuspenseQuery(adminQueries.ssoStatus())
 
   // Tier flag from the root context (already populated by BootstrapData
   // for every admin route).
@@ -71,9 +67,7 @@ function AuthenticationPage() {
         portalOauth={portalOauth}
         credentialStatus={credentialStatusQuery.data}
         customOidcProviderTier={customOidcProviderTier}
-        ssoStatus={ssoStatusQuery.data}
       />
-      {tab === 'team' ? <RecoveryCodesSection /> : null}
     </div>
   )
 }

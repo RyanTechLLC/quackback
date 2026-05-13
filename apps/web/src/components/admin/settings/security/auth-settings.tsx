@@ -1,9 +1,8 @@
 import { useNavigate } from '@tanstack/react-router'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { SsoConnectionSection } from './sso/sso-connection-section'
+import { TeamAuthMethodsSection } from './team-auth-methods-section'
 import { PortalAuthTab } from './portal-auth-tab'
 import type { AuthConfig, PortalAuthMethods } from '@/lib/shared/types/settings'
-import type { SsoStatus } from '@/lib/server/functions/sso'
 
 export type AuthTab = 'team' | 'portal'
 
@@ -16,8 +15,8 @@ interface AuthSettingsProps {
   /** Portal-side oauth/methods from settings.portalConfig.oauth. */
   portalOauth: PortalAuthMethods
   credentialStatus: Record<string, boolean> & { _emailConfigured?: boolean }
+  /** Tier flag for portal custom OIDC — passed through to <PortalAuthTab>. */
   customOidcProviderTier: boolean
-  ssoStatus: SsoStatus
 }
 
 /**
@@ -25,12 +24,8 @@ interface AuthSettingsProps {
  *
  * Two audience-scoped tabs (Team and Portal) sit on top of the same
  * provider catalog and `platform_credentials` rows. Selecting a tab
- * shows the per-audience methods + per-audience OAuth toggles; the
- * Team tab also surfaces SSO/OIDC configuration and enforcement.
- *
- * Provider credentials are written by a shared `<AuthProviderCredentialsDialog>`
- * opened from either tab — the visible reuse is what teaches admins
- * the "set once, enable per audience" model.
+ * shows the per-audience methods + per-audience OAuth toggles. SSO
+ * configuration has moved to the dedicated /sso page.
  *
  * The selected tab is stored in `?tab=`. Sidebar entries from both
  * "Security" and "End Users" point at the same route with different
@@ -43,7 +38,6 @@ export function AuthSettings({
   portalOauth,
   credentialStatus,
   customOidcProviderTier,
-  ssoStatus,
 }: AuthSettingsProps) {
   // No `from` — passes an absolute `to`, so binding the navigate hook
   // to a route would just append paths under TanStack Router's
@@ -71,11 +65,7 @@ export function AuthSettings({
       </TabsList>
 
       <TabsContent value="team">
-        <SsoConnectionSection
-          initialConfig={teamAuthConfig}
-          customOidcProviderTier={customOidcProviderTier}
-          ssoStatus={ssoStatus}
-        />
+        <TeamAuthMethodsSection initialConfig={teamAuthConfig} />
       </TabsContent>
 
       <TabsContent value="portal">
