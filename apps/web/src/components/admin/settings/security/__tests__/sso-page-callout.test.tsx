@@ -36,16 +36,28 @@ describe('<SsoPageCallout>', () => {
         verifiedDomains={[]}
       />
     )
-    expect(screen.getByText(/configure sso/i)).toBeInTheDocument()
+    expect(screen.getByText(/single sign-on is set up/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /manage sso/i })).toHaveAttribute(
+      'href',
+      '/admin/settings/security/sso'
+    )
   })
 
   it('renders when at least one verified domain exists', () => {
     render(<SsoPageCallout authConfig={baseConfig} verifiedDomains={[verifiedDomain]} />)
-    expect(screen.getByText(/configure sso/i)).toBeInTheDocument()
+    expect(screen.getByText(/single sign-on is set up/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /manage sso/i })).toHaveAttribute(
+      'href',
+      '/admin/settings/security/sso'
+    )
   })
 
-  it('does NOT render when ssoOidc.enabled is not true and no domains', () => {
-    const { container } = render(<SsoPageCallout authConfig={baseConfig} verifiedDomains={[]} />)
-    expect(container.firstChild).toBeNull()
+  it('renders the setup CTA when SSO is not yet configured', () => {
+    render(<SsoPageCallout authConfig={baseConfig} verifiedDomains={[]} />)
+    expect(screen.getByText(/connect single sign-on/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /set up sso/i })).toHaveAttribute(
+      'href',
+      '/admin/settings/security/sso'
+    )
   })
 })
