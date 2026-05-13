@@ -37,6 +37,7 @@ import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/
 import { listInboxPosts } from '@/lib/server/domains/posts/post.inbox'
 import { getPostWithDetails, getCommentsWithReplies } from '@/lib/server/domains/posts/post.query'
 import { createPost, updatePost } from '@/lib/server/domains/posts/post.service'
+import { segmentIdsForPrincipal } from '@/lib/server/domains/segments/segment-membership.service'
 import { voteOnPost, addVoteOnBehalf, removeVote } from '@/lib/server/domains/posts/post.voting'
 import { mergePost, unmergePost, getMergedPosts } from '@/lib/server/domains/posts/post.merge'
 import { softDeletePost, restorePost } from '@/lib/server/domains/posts/post.user-actions'
@@ -52,10 +53,7 @@ import {
   dismissMergeSuggestion,
   restoreMergeSuggestion,
 } from '@/lib/server/domains/merge-suggestions/merge-suggestion.service'
-import {
-  createComment,
-  deleteComment,
-} from '@/lib/server/domains/comments/comment.service'
+import { createComment, deleteComment } from '@/lib/server/domains/comments/comment.service'
 import { userEditComment } from '@/lib/server/domains/comments/comment.permissions'
 import { addReaction, removeReaction } from '@/lib/server/domains/comments/comment.reactions'
 import {
@@ -551,7 +549,11 @@ const createHelpCenterArticleSchema = {
       'Article content. Markdown (GFM), max 50,000 chars. Images via ![alt](url) are auto-rehosted to workspace storage on save. See tool description for full format details.'
     ),
   slug: z.string().max(200).optional().describe('URL slug (auto-generated from title if omitted)'),
-  description: z.string().max(300).optional().describe('Short page description for SEO and article previews (max 300 chars)'),
+  description: z
+    .string()
+    .max(300)
+    .optional()
+    .describe('Short page description for SEO and article previews (max 300 chars)'),
   authorId: z
     .string()
     .optional()
@@ -579,10 +581,7 @@ const updateHelpCenterArticleSchema = {
     .describe(
       'Any ISO 8601 datetime string to publish immediately (e.g. "2026-04-08T00:00:00Z"), or null to unpublish. The exact timestamp is not used — articles are always published at the current time.'
     ),
-  authorId: z
-    .string()
-    .optional()
-    .describe('Principal TypeID to reassign as the article author'),
+  authorId: z.string().optional().describe('Principal TypeID to reassign as the article author'),
 }
 
 const deleteHelpCenterArticleSchema = {
@@ -1081,6 +1080,16 @@ Examples:
       const denied = requireScope(auth, 'write:feedback')
       if (denied) return denied
       try {
+        // MCP auth is admin-scoped; build a team-shaped actor so the policy
+        // gate inside createPost bypasses moderation (admin posts are trusted).
+        const callerSegmentIds = await segmentIdsForPrincipal(auth.principalId)
+        const actor = {
+          principalId: auth.principalId,
+          role: 'admin' as const,
+          principalType: 'user' as const,
+          segmentIds: callerSegmentIds,
+        }
+
         const result = await createPost(
           {
             boardId: args.boardId as BoardId,
@@ -1095,6 +1104,7 @@ Examples:
             name: auth.name,
             email: auth.email,
             displayName: auth.name,
+            actor,
           }
         )
 
@@ -1238,11 +1248,10 @@ Examples:
       if (scopeDenied) return scopeDenied
       // No team role gate — the service layer allows comment authors OR team members
       try {
-        const result = await userEditComment(
-          args.commentId as CommentId,
-          args.content,
-          { principalId: auth.principalId, role: auth.role }
-        )
+        const result = await userEditComment(args.commentId as CommentId, args.content, {
+          principalId: auth.principalId,
+          role: auth.role,
+        })
 
         return jsonResult({
           id: result.id,
@@ -1762,8 +1771,7 @@ Examples:
 
         const { articleId: _, publishedAt: __, authorId: ___, ...updateData } = args
         const hasUpdates =
-          Object.values(updateData).some((v) => v !== undefined) ||
-          authorPrincipalId !== undefined
+          Object.values(updateData).some((v) => v !== undefined) || authorPrincipalId !== undefined
 
         // Validate + apply field/author updates first so a bad authorId
         // never leaves the article in a partially-published state.

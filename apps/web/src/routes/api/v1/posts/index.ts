@@ -14,6 +14,7 @@ import {
   parseTypeIdArray,
 } from '@/lib/server/domains/api/validation'
 import type { BoardId, PrincipalId, StatusId, TagId } from '@quackback/ids'
+import { segmentIdsForPrincipal } from '@/lib/server/domains/segments/segment-membership.service'
 
 // Input validation schemas
 const createPostSchema = z.object({
@@ -191,6 +192,19 @@ export const Route = createFileRoute('/api/v1/posts/')({
               ? new Date(parsed.data.createdAt)
               : undefined
 
+          // Build a policy actor from the API key's principal so canCreatePost
+          // sees the correct team/role. API keys gated by role='team' above
+          // means the actor is always team here and bypasses moderation,
+          // but we pass it explicitly so audience checks apply (defense in depth).
+          const callerSegmentIds = await segmentIdsForPrincipal(auth.principalId)
+          const actor = {
+            principalId: auth.principalId,
+            role: auth.role,
+            principalType:
+              principalRecord.type === 'service' ? ('service' as const) : ('user' as const),
+            segmentIds: callerSegmentIds,
+          }
+
           const result = await createPost(
             {
               boardId,
@@ -206,6 +220,7 @@ export const Route = createFileRoute('/api/v1/posts/')({
               displayName: principalRecord.displayName ?? undefined,
               name: principalRecord.user?.name,
               email: principalRecord.user?.email ?? undefined,
+              actor,
             },
             { skipDispatch: auth.importMode }
           )

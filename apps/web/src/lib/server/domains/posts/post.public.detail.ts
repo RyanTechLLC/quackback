@@ -20,14 +20,28 @@ import { buildCommentTree, toStatusChange } from '@/lib/shared'
 import type { PublicPostDetail, PublicComment, PinnedComment } from './post.types'
 import { resolveAvatarUrl, parseJson, parseAvatarData } from './post.public'
 import { getExecuteRows } from '@/lib/server/utils'
-import { canViewPost, ANONYMOUS_ACTOR, type Actor } from '@/lib/server/policy'
+import { canViewPost, isTeamActor, ANONYMOUS_ACTOR, type Actor } from '@/lib/server/policy'
 
+/**
+ * Fetch the public-facing detail view for a post.
+ *
+ * The `actor` drives both visibility (via canViewPost) AND comment-private
+ * filtering: team actors see `is_private` comments, non-team actors don't.
+ * The `principalId` (for highlighting your own comments) is also derived
+ * from the actor — anonymous viewers pass undefined.
+ *
+ * Previously these were three separate parameters that callers had to
+ * keep in sync; threading actor consolidates them so the caller can't
+ * accidentally pass an admin actor with `includePrivateComments=false`
+ * and silently hide rows that should appear.
+ */
 export async function getPublicPostDetail(
   postId: PostId,
-  principalId?: PrincipalId,
-  options?: { includePrivateComments?: boolean; actor?: Actor }
+  actor: Actor = ANONYMOUS_ACTOR
 ): Promise<PublicPostDetail | null> {
   const postUuid = toUuid(postId)
+  const principalId = (actor.principalId ?? undefined) as PrincipalId | undefined
+  const includePrivateComments = isTeamActor(actor)
 
   // Run post and comments queries in parallel (2 queries total)
   const [postResults, commentsWithReactions] = await Promise.all([
@@ -141,7 +155,7 @@ export async function getPublicPostDetail(
         SELECT p.id FROM ${posts} p
         WHERE p.canonical_post_id = ${postUuid}::uuid AND p.deleted_at IS NULL
       )
-      ${options?.includePrivateComments ? sql`` : sql`AND c.is_private = false`}
+      ${includePrivateComments ? sql`` : sql`AND c.is_private = false`}
       GROUP BY c.id, m.display_name, m.avatar_key, m.avatar_url, scf.name, scf.color, sct.name, sct.color
       ORDER BY c.created_at ASC
     `),
@@ -157,7 +171,6 @@ export async function getPublicPostDetail(
   //   - posts in non-published moderationState for non-authors and non-team
   // The 404-on-deny shape matches the previous behaviour (don't leak
   // existence to unauthorized callers).
-  const actor = options?.actor ?? ANONYMOUS_ACTOR
   const viewDecision = canViewPost(
     actor,
     { moderationState: postResult.postModerationState, principalId: postResult.postPrincipalId },
@@ -239,7 +252,7 @@ export async function getPublicPostDetail(
   }))
 
   const commentTree = buildCommentTree(commentsResult, principalId, {
-    pruneDeleted: !options?.includePrivateComments,
+    pruneDeleted: !includePrivateComments,
   })
 
   const mapToPublicComment = (node: (typeof commentTree)[0]): PublicComment => {

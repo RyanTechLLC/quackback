@@ -11,7 +11,7 @@ import {
   type UserId,
 } from '@quackback/ids'
 import type { BoardSettings } from '@/lib/server/db'
-import { getOptionalAuth, hasAuthCredentials } from './auth-helpers'
+import { getOptionalAuth, hasAuthCredentials, policyActorFromAuth } from './auth-helpers'
 import { isTeamMember } from '@/lib/shared/roles'
 import { db, principal as principalTable, user as userTable, eq, inArray } from '@/lib/server/db'
 import { getPublicUrlOrNull } from '@/lib/server/storage/s3'
@@ -76,6 +76,13 @@ export const fetchPortalData = createServerFn({ method: 'GET' })
   .inputValidator(fetchPortalDataSchema)
   .handler(async ({ data }) => {
     console.log(`[fn:portal] fetchPortalData: boardSlug=${data.boardSlug}, sort=${data.sort}`)
+    // Resolve the policy actor from the current session before fanning out the
+    // parallel queries. List helpers default to ANONYMOUS_ACTOR; we pass the
+    // real one so signed-in users and segment members see audience-restricted
+    // boards + their own pending posts.
+    const auth = await getOptionalAuth()
+    const actor = await policyActorFromAuth(auth)
+
     // Run ALL queries in parallel for maximum performance
     // Member lookup and votes run independently alongside posts/boards/statuses/tags
     const [memberResult, boardsRaw, postsResult, statuses, tags, allVotedPosts] = await Promise.all(
@@ -87,9 +94,10 @@ export const fetchPortalData = createServerFn({ method: 'GET' })
               columns: { id: true },
             })
           : null,
-        listPublicBoardsWithStats(),
+        listPublicBoardsWithStats(actor),
         // Posts WITHOUT embedded vote check (we get votes separately for parallelism)
         listPublicPostsWithVotesAndAvatars({
+          actor,
           boardSlug: data.boardSlug,
           search: data.search,
           statusSlugs: data.statusSlugs,
@@ -145,7 +153,9 @@ export const fetchPortalData = createServerFn({ method: 'GET' })
 export const fetchPublicBoards = createServerFn({ method: 'GET' }).handler(async () => {
   console.log(`[fn:portal] fetchPublicBoards`)
   try {
-    const boards = await listPublicBoardsWithStats()
+    const auth = await getOptionalAuth()
+    const actor = await policyActorFromAuth(auth)
+    const boards = await listPublicBoardsWithStats(actor)
     return boards.map((b) => ({ ...b, settings: (b.settings ?? {}) as BoardSettings }))
   } catch (error) {
     console.error(`[fn:portal] fetchPublicBoards failed:`, error)
@@ -171,13 +181,13 @@ export const fetchPublicPostDetail = createServerFn({ method: 'GET' })
   .inputValidator(z.object({ postId: z.string() }))
   .handler(async ({ data }) => {
     console.log(`[fn:portal] fetchPublicPostDetail: postId=${data.postId}`)
-    // Only fetch auth if user has a session cookie (for highlighting own comments)
+    // The policy actor is the sole input getPublicPostDetail needs:
+    // it drives the visibility check, the principalId-for-own-comments
+    // lookup, and the include-private-comments flag (derived from
+    // isTeamActor). Same resolution path as list reads.
     const auth = hasAuthCredentials() ? await getOptionalAuth() : null
-    const principalId = auth?.principal?.id
-    const isTeamMember = auth?.principal?.role === 'admin' || auth?.principal?.role === 'member'
-    const result = await getPublicPostDetail(data.postId as PostId, principalId, {
-      includePrivateComments: isTeamMember,
-    })
+    const actor = await policyActorFromAuth(auth)
+    const result = await getPublicPostDetail(data.postId as PostId, actor)
 
     if (!result) return null
 
@@ -223,7 +233,9 @@ export const fetchPublicPosts = createServerFn({ method: 'GET' })
   .handler(async ({ data }) => {
     console.log(`[fn:portal] fetchPublicPosts: boardSlug=${data.boardSlug}, sort=${data.sort}`)
     try {
-      const result = await listPublicPosts({ ...data, page: 1, limit: 20 })
+      const auth = await getOptionalAuth()
+      const actor = await policyActorFromAuth(auth)
+      const result = await listPublicPosts({ ...data, page: 1, limit: 20, actor })
       return {
         ...result,
         items: result.items.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() })),

@@ -7,7 +7,7 @@
 import { and, eq, or, sql, type SQL } from 'drizzle-orm'
 import { posts, type BoardAudience, type BoardModeration } from '@/lib/server/db'
 import type { PrincipalId } from '@quackback/ids'
-import { allowDecision, denyDecision, type Actor, type Decision } from './types'
+import { allowDecision, denyDecision, isTeamActor, type Actor, type Decision } from './types'
 import { canViewBoard, boardViewFilter } from './boards'
 
 type ModerationState = 'published' | 'pending' | 'spam' | 'archived' | 'closed' | 'deleted'
@@ -22,9 +22,7 @@ interface BoardShape {
   moderation?: BoardModeration
 }
 
-function isTeam(actor: Actor): boolean {
-  return actor.role === 'admin' || actor.role === 'member'
-}
+const isTeam = isTeamActor
 
 export function canViewPost(actor: Actor, post: PostShape, board: BoardShape): Decision {
   const boardDecision = canViewBoard(actor, board)

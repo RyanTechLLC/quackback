@@ -36,6 +36,19 @@ export function isAllowed(decision: Decision): boolean {
   return decision.allowed
 }
 
+/**
+ * Whether the actor is a team member (admin or member). Use this for
+ * resource-level "team sees more" decisions inside handlers — distinct
+ * from `requireAuth({ roles })` which gates route entry.
+ *
+ * Centralized here so the rule lives in exactly one place: a future
+ * change to who counts as "team" (e.g. adding a 'moderator' role)
+ * only touches this function plus its callers via typecheck.
+ */
+export function isTeamActor(actor: Actor): boolean {
+  return actor.role === 'admin' || actor.role === 'member'
+}
+
 /** Anonymous actor — used by public portal pages and unsigned widget requests. */
 export const ANONYMOUS_ACTOR: Actor = {
   principalId: null,

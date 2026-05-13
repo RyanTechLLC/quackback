@@ -90,6 +90,10 @@ vi.mock('@/lib/server/domains/posts/post.query', () => ({
   getCommentsWithReplies: vi.fn().mockResolvedValue([]),
 }))
 
+vi.mock('@/lib/server/domains/segments/segment-membership.service', () => ({
+  segmentIdsForPrincipal: vi.fn(async () => new Set()),
+}))
+
 vi.mock('@/lib/server/domains/posts/post.service', () => ({
   createPost: vi.fn().mockResolvedValue({
     id: 'post_new',

@@ -6,11 +6,9 @@
  */
 import { sql, type SQL } from 'drizzle-orm'
 import { boards, type BoardAudience } from '@/lib/server/db'
-import { allowDecision, denyDecision, type Actor, type Decision } from './types'
+import { allowDecision, denyDecision, isTeamActor, type Actor, type Decision } from './types'
 
-function isTeam(actor: Actor): boolean {
-  return actor.role === 'admin' || actor.role === 'member'
-}
+const isTeam = isTeamActor
 
 /** Single-row board read authorization. */
 export function canViewBoard(actor: Actor, board: { audience: BoardAudience }): Decision {
