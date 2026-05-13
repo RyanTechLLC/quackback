@@ -1,6 +1,8 @@
 # Quackback SSO — Holistic Review vs SaaS Best Practice
 
-Branch: `feat/sso-enforcement-v0.11` · 36 commits · 0057_audit_log..0059_sso_required_default
+Branch: `feat/sso-enforcement-v0.11` · 37 commits · 0057_audit_log..0059_sso_required_default
+
+> **Update (post-P1 patch, commit `82b25bcb`):** The five P1 gaps surfaced in the first pass of this review have all been closed in-branch. The rows in the tables below reflect the post-patch state. The original "Most important gaps to close" section is preserved at the bottom for historical reference, with a per-item ✅ status.
 
 ## Scope of comparison
 
@@ -50,7 +52,7 @@ Priorities: **P0** ship-blocker for enterprise / **P1** notable gap, close in v0
 | "Use a recovery code" link on login page | ✅ `/admin/login` footer points to `/auth/recovery` | GitHub, Linear, Notion all expose | ✅ | — | Added in `d666719a` |
 | SSO discovery error messages (timeout, wrong type, http_401) | ✅ Mapped error codes with helpful copy | Most SaaS show "sign-in failed" generic; Auth0 surfaces details | ✅ | — | `admin.login.tsx` |
 | Sign-in-as-admin escape on portal route | ✅ Hooks route team-role users to `/admin/login?error=sso_required` | Slack does this; most don't | ✅ | — | |
-| Sign-in audit (every successful + failed attempt) | ⚠️ Failures audited (`auth.method.blocked`); successes implicit via session creation | Okta, Auth0 log every attempt. Compliance customers expect both | ⚠️ | P1 | Add `auth.signin.success` event |
+| Sign-in audit (every successful + failed attempt) | ✅ `auth.signin.success` emitted from `handleSignInSuccessAudit` (runs last in hooksAfter so only sessions that survived policy cleanup get recorded). Failures still audited via `auth.method.blocked` | Okta, Auth0 log every attempt. We now match | ✅ | — | Closed in `82b25bcb` |
 | Anomaly detection (impossible travel, new device) | ❌ Not present | Okta, Auth0 ship as paid add-on. Modern SaaS (Linear) skips it | ❌ | P3 | Out of scope; integrate with downstream SIEM |
 | Geo/IP allowlists on SSO | ❌ Not present | GitHub Enterprise, Okta. Niche feature | ❌ | P3 | |
 
@@ -99,13 +101,13 @@ Priorities: **P0** ship-blocker for enterprise / **P1** notable gap, close in v0
 |---|---|---|---|---|---|
 | Audit log table | ✅ `audit_log` append-only with three `(col, occurred_at DESC)` indexes | Okta, Auth0, GitHub Enterprise. Modern SaaS (Linear, Vercel) ship this | ✅ | — | |
 | Denormalised actor (email, role, IP, UA) | ✅ Survives user deletion | GitHub keeps even after user deletion; Notion redacts on GDPR | ✅ | — | Compliance-friendly |
-| Event taxonomy | ⚠️ 9 event types, all SSO/auth-scoped | Okta has 200+ event types; modern SaaS has ~30. We're narrow | ⚠️ | P1 | Add: `auth.signin.success`, `auth.signout`, `session.revoked.individual`, `user.invited/accepted/removed`, `role.changed.by_admin` |
+| Event taxonomy | ⚠️ ~22 event types now (added `auth.signin.success`, `session.revoked.individual` in the P1 patch). Still narrow vs Okta's 200+ | Okta has 200+ event types; modern SaaS has ~30. We're closer | ⚠️ | P2 | Add: `auth.signout`, `user.invited/accepted/removed`, `role.changed.by_admin` — covered by the existing helper, just need call-site wiring |
 | Admin UI: paginated table | ✅ `/admin/settings/security/audit-log` | Linear: in-app table. GitHub: API + dashboard. Notion: CSV-only | ✅ | — | |
-| Filter by event type + time range | ✅ | Linear: by user + event. GitHub: many filters | ⚠️ | P1 | Add actor filter |
+| Filter by event type, actor email, time range | ✅ Event-type select + actor-email search (debounced, ILIKE substring match) + time-range select | Linear: by user + event. GitHub: many filters | ✅ | — | Closed in `82b25bcb` |
 | CSV export | ✅ Client-side from filtered window | Notion CSV. GitHub Enterprise JSON | ✅ | — | |
 | SIEM streaming (Splunk/Datadog) | ❌ No HTTP webhook for audit events | Okta SCIM events, Auth0 streams, GitHub Enterprise webhook | ❌ | P2 | Genuinely valuable for enterprise |
 | Tamper-evident chain (hash-chained rows) | ❌ Just append-only Postgres | Auth0 ships hash chains as paid add-on; not industry standard | 🟡 | P3 | Useful but overkill |
-| Retention policy | ❌ Infinite (documented in plan) | GitHub Enterprise: 180 days default. Linear: 90 days free, longer paid. SOC2 needs ≥1 year | ⚠️ | P1 | Add 365-day default + configurable cap |
+| Retention policy | ✅ 365-day default via `pruneAuditLog()` running once at startup + every 24h. 0 = keep forever for self-hosters that opt out | GitHub Enterprise: 180 days default. Linear: 90 days free, longer paid. SOC2 needs ≥1 year — we beat both at the default | ✅ | — | Closed in `82b25bcb` |
 | GDPR scrub path | ❌ No tool to redact actor PII | Linear, Notion have GDPR right-to-erasure flows | ❌ | P2 | Compliance-required for EU customers |
 | Audit log query API | ❌ Only UI today | Okta, Auth0 publish API. Linear has API | ❌ | P2 | Useful for SIEM integration |
 
@@ -137,7 +139,7 @@ Priorities: **P0** ship-blocker for enterprise / **P1** notable gap, close in v0
 | `lastSsoSignInAt` tracking | ✅ Stamped on every successful SSO callback | Okta, Auth0 track. Used by bootstrap guard | ✅ | — | |
 | Cookie security (HttpOnly, Secure, SameSite) | ✅ Better-Auth defaults | Standard | ✅ | — | |
 | Session revocation on policy enable | ✅ `revokeNonSsoTeamSessions` | GitHub Enterprise on SAML enable; most SaaS don't | ✅ | — | Stronger than baseline |
-| Force-logout-all from admin UI | ❌ Admin can't force a specific user's sessions to end | Linear, Notion, Vercel admin panels all have | ❌ | P1 | Should be straightforward — wire into existing session table |
+| Force-logout-all from admin UI | ✅ "Sign out everywhere" action in the team-list dropdown — calls `forceSignOutUserFn` which deletes every session row for the user and emits `session.revoked.individual` audit with the affected-row count | Linear, Notion, Vercel admin panels all have | ✅ | — | Closed in `82b25bcb` |
 | Concurrent-session cap | ❌ Unlimited | Okta has policy. Most SaaS unlimited | 🟡 | P3 | |
 | Session inactivity timeout | ⚠️ Better-Auth's default | Okta configurable per policy; most SaaS fixed | 🟡 | P3 | |
 | IP-pinning / device fingerprinting | ❌ Not present | Okta paid feature; Linear/Vercel skip | 🟡 | P3 | |
@@ -163,7 +165,7 @@ Priorities: **P0** ship-blocker for enterprise / **P1** notable gap, close in v0
 | Capability | Quackback today | Industry baseline | Status | Priority | Notes |
 |---|---|---|---|---|---|
 | Sign-in success/failure metrics in admin UI | ❌ Audit log only, no aggregations | Linear: simple dashboard. Okta: extensive reports | ❌ | P2 | Could be a "Stats" tile on Security page |
-| User-level last-sign-in display | ⚠️ `lastSsoSignInAt` stored but not surfaced in admin team list | Standard in admin UIs (Linear, GitHub, Vercel) | ⚠️ | P1 | One-line UI add |
+| User-level last-sign-in display | ✅ Team list has a "Last sign-in" column computed as `max(session.created_at)` per user via a left-join subquery; renders as "Today" / "Yesterday" / "Nd ago" / date with exact timestamp on hover. Null for never-signed-in users | Standard in admin UIs (Linear, GitHub, Vercel). We now match | ✅ | — | Closed in `82b25bcb` |
 | Compliance reports (SOC2 export bundles) | ❌ Not present | Vercel has a Compliance page; Linear has SOC2 reports area | ❌ | P3 | Bigger effort |
 | Webhook on policy change | ❌ | Auth0 has Rules → webhook | ❌ | P3 | |
 | Alert when SSO breaks (callback errors rising) | ❌ | Okta dashboards. Most SaaS don't have | 🟡 | P3 | |
@@ -217,16 +219,24 @@ Priorities: **P0** ship-blocker for enterprise / **P1** notable gap, close in v0
 
 ### Most important gaps to close
 
+#### P1 — all closed in commit `82b25bcb` ✅
+
+| Item | Status |
+|---|---|
+| `auth.signin.success` audit event (currently only failures logged explicitly) | ✅ Emitted from `handleSignInSuccessAudit` at the tail of hooksAfter |
+| Audit-log retention policy (currently infinite — SOC2 wants ≥1yr; default 365-day cap + admin override) | ✅ `pruneAuditLog()` runs once at startup + every 24h, default 365d, `0` opts out |
+| Actor / IP search filter on the audit-log UI | ✅ Debounced actor-email substring filter; ILIKE on the denormalised column |
+| Force-logout-all from admin team list | ✅ "Sign out everywhere" action on each member row; emits `session.revoked.individual` audit |
+| Last-sign-in column in admin team list | ✅ Computed via `max(session.created_at)` subquery; rendered with friendly relative timestamps |
+
+#### P2 — v0.12 candidates
+
 | Priority | Gap | Effort | Why now |
 |---|---|---|---|
-| **P1** | `auth.signin.success` audit event (currently only failures logged explicitly) | S | SOC2 customers will ask in questionnaires |
-| **P1** | Audit-log retention policy (currently infinite — SOC2 wants ≥1yr; default 365-day cap + admin override) | S | DB growth ceiling for self-hosters; compliance |
-| **P1** | Actor / IP search filter on the audit-log UI | XS | Useful for incident response |
-| **P1** | Force-logout-all from admin team list | S | Standard admin action; we have the session table |
-| **P1** | Last-sign-in column in admin team list | XS | We already store `lastSsoSignInAt`; one UI add |
 | **P2** | SCIM 2.0 endpoint | XL | Required for enterprise / Okta App Catalog listing |
 | **P2** | SAML 2.0 alongside OIDC | L | ~30% of enterprise IdPs default to SAML |
 | **P2** | SIEM streaming (audit log webhook / API) | M | Splunk/Datadog ingest is a checkbox item |
+| **P2** | Expand audit event taxonomy (`auth.signout`, `user.invited/accepted/removed`, `role.changed.by_admin`) | S | Call-site wiring only — helper already supports |
 | **P2** | Federated-domain claiming (one workspace per verified domain across the platform) | M | Cloud-tier concern |
 | **P2** | GDPR scrub path for audit-log actor PII | M | EU customers need this |
 | **P2** | "I lost my recovery codes" admin reset | S | UX gap; today recovery is silent |
@@ -235,15 +245,19 @@ Priorities: **P0** ship-blocker for enterprise / **P1** notable gap, close in v0
 | **P3** | Multi-IdP per workspace | L | Rarely needed |
 | **P3** | Role-scoped enforcement (admins must SSO, members optional) | M | Edge case |
 
-### Recommended v0.11.x patch series
+### v0.11.x P1 patch series — completed
 
-A small follow-up release could close most of the **P1** items in ~1-2 days:
+The five items below all landed in commit `82b25bcb` on this branch:
 
-1. Add `auth.signin.success` event type + emit from a post-session hook
-2. Add audit-log retention policy: schema field on `settings`, default 365 days, hourly prune job in BullMQ
-3. Extend `listAuditEventsFn` with `actorEmail` filter + add the filter input to the admin UI
-4. Add "Force sign-out" button in `/admin/settings/team` per-user actions (deletes all session rows for that user, emits `session.revoked.bulk` with `reason: 'admin_forced'`)
-5. Add a "Last sign-in" column to the team table (read `lastSsoSignInAt`, or extend to read the most recent `session.created_at` for non-SSO users)
+| Item | Implementation |
+|---|---|
+| `auth.signin.success` event | `handleSignInSuccessAudit` in `hooks.ts` runs last in the after-hook chain so it only audits sessions that survived policy cleanup. Provider inferred from path; role re-read post-provision so the audit row reflects the post-promotion role. |
+| Audit-log retention | `pruneAuditLog()` in `audit/log.ts` deletes rows older than `DEFAULT_AUDIT_RETENTION_DAYS` (365). Wired into `startup.ts` with a 30s initial delay + 24h interval. Single SQL DELETE on the indexed `occurred_at DESC` column. |
+| Actor-email filter | `listAuditEventsInput` gains an optional `actorEmail` field (trimmed, lowered, ILIKE substring). Page adds an `<Input type="search">` with a 300ms debounce so each keystroke doesn't spam the server fn. |
+| Force-sign-out per user | New `forceSignOutUserFn` in `admin.ts` runs a single DELETE on the session table for the target user, emits `session.revoked.individual` with the affected-row count + `reason: 'admin_forced'` metadata. Wired into the team-list dropdown with a confirm dialog + toast feedback. |
+| Last-sign-in column | `fetchTeamMembersAndInvitations` now joins a `max(session.created_at)` subquery, serialises the timestamp to ISO. The team table renders "Today / Yesterday / Nd ago / Date" with the exact moment on hover. |
+
+Two new event types added to the closed `AuditEventType` union: `auth.signin.success` and `session.revoked.individual` (the latter complements `session.revoked.bulk` for distinguishing per-user vs policy-driven revocations).
 
 ### Recommended v0.12 themes
 
@@ -253,8 +267,11 @@ A small follow-up release could close most of the **P1** items in ~1-2 days:
 
 ---
 
-## TL;DR
+## TL;DR (post-P1 patch)
 
-For a v0.11 SSO implementation, this is a **strong baseline** — substantially better than the typical "OIDC button + per-domain enforce" most SaaS ship at first launch. The recovery-codes, audit-log, attribute-mapping, and enforcement coverage are at-or-above industry parity for B2B SaaS targeting compliance-aware customers.
+For a v0.11 SSO implementation, this is a **strong, compliance-ready baseline** — substantially better than the typical "OIDC button + per-domain enforce" most SaaS ship at first launch. With the P1 patch landed:
 
-The gap to true enterprise (Okta App Catalog listing, SCIM, SAML, SIEM streaming) is real but is itself a 6-12 week project of its own (v0.12 territory). The **P1 items above are the highest-leverage closures** for the current branch and could ship as a `.1` patch alongside merge to main.
+- **Recovery codes**, **audit log** (with retention + actor filter + sign-in success events), **attribute mapping** (with optional sync-on-every-sign-in), and **enforcement coverage** are at-or-above industry parity for B2B SaaS targeting compliance-aware customers.
+- **Admin lifecycle controls** (force-sign-out, last-sign-in visibility, recovery-code low-water warning) match what Linear / Vercel / Notion ship in their team-management surfaces.
+
+The gap to true enterprise (Okta App Catalog listing, SCIM, SAML, SIEM streaming) is real but is itself a 6-12 week project of its own — **v0.12 territory**. Everything inside v0.11's scope is now closed; the branch is mergeable as-is for the OSS / SMB / mid-market tier.
