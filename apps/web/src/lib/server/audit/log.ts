@@ -31,8 +31,6 @@ export type JsonValue =
 export type AuditEventType =
   | 'sso.enforcement.domain.enabled'
   | 'sso.enforcement.domain.disabled'
-  | 'sso.enforcement.workspace_required.enabled'
-  | 'sso.enforcement.workspace_required.disabled'
   | 'sso.config.changed'
   | 'sso.recovery_codes.generated'
   | 'sso.recovery_codes.used'
