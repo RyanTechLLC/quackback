@@ -341,8 +341,7 @@ function PromptState({ reason }: { reason: string | null }) {
         </Alert>
       ) : null}
       <p className="text-sm text-muted-foreground">
-        We&apos;ll open your IdP in a popup. Sign in there and we&apos;ll show what happened — no
-        changes are made until the test succeeds.
+        We&apos;ll open your IdP in a popup. Nothing changes until the test passes.
       </p>
     </div>
   )
@@ -353,10 +352,8 @@ function WaitingState() {
     <div className="flex flex-col items-center gap-3 py-10 text-center">
       <ArrowPathIcon className="h-6 w-6 animate-spin text-muted-foreground" />
       <div className="space-y-1">
-        <p className="text-sm font-medium">Waiting for your sign-in</p>
-        <p className="text-xs text-muted-foreground">
-          A popup just opened. Sign in there and the result will appear here.
-        </p>
+        <p className="text-sm font-medium">Waiting for sign-in</p>
+        <p className="text-xs text-muted-foreground">Finish signing in in the popup.</p>
       </div>
     </div>
   )
@@ -364,22 +361,18 @@ function WaitingState() {
 
 /** Modal description copy for the current phase. */
 function describeModalState(state: ReturnType<typeof ssoTestReducer>, applying: boolean): string {
-  if (applying) return 'Sign-in works — applying your change…'
+  if (applying) return 'Sign-in works. Applying…'
   if (state.phase === 'prompt') {
     return state.reason
-      ? 'A successful test sign-in is required before this change can take effect.'
-      : 'Check that your IdP configuration works end to end.'
+      ? 'Verify your SSO connection first.'
+      : 'Check that your SSO connection works.'
   }
-  if (state.phase === 'testing') {
-    return "Sign in to your IdP in the popup. We'll show what happened here when you're done."
-  }
+  if (state.phase === 'testing') return 'Finish signing in in the popup.'
   if (state.result) {
-    return state.result.ok
-      ? 'Looks good — everything went through.'
-      : "Something didn't connect. The steps below show where."
+    return state.result.ok ? 'Your SSO connection works.' : "Sign-in didn't complete."
   }
-  if (state.error) return "Something didn't connect."
-  return "Sign in to your IdP in a popup. We'll walk you through what happened."
+  if (state.error) return 'Sign-in failed.'
+  return 'Check that your SSO connection works.'
 }
 
 function friendlyStartError(error: string): string {
@@ -444,19 +437,17 @@ function TestResultPanel({
         <StepList steps={result.steps} />
         {identityMatched ? (
           <div className="rounded border border-green-500/30 bg-green-500/10 p-2 text-xs text-green-700">
-            <span className="font-medium">✓ Identity matches your admin account.</span> SSO actions
-            are unlocked.
+            <span className="font-medium">Identity confirmed.</span> SSO actions are unlocked.
           </div>
         ) : (
           <div className="rounded border border-muted bg-muted/30 p-2 text-xs text-muted-foreground">
-            <span className="font-medium">ℹ</span> Tested as{' '}
-            {result.claims.email ?? 'an account with no email claim'}, but you&apos;re signed in as
-            someone else. To unlock SSO actions, sign in to the IdP using your own admin email.
+            Tested as {result.claims.email ?? 'an account with no email'}, not your admin account.
+            Sign in with your own admin email to unlock SSO actions.
           </div>
         )}
         <details className="text-xs">
           <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-            Show what your IdP returned
+            Show IdP response
           </summary>
           <pre className="mt-2 overflow-auto rounded bg-muted/30 p-2 font-mono text-[11px]">
             {JSON.stringify({ claims: result.claims, tokenInfo: result.tokenInfo }, null, 2)}

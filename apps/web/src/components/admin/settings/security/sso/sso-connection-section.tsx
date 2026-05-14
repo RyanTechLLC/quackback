@@ -506,7 +506,7 @@ function SsoConfiguredForm({
   const handleEnabledToggle = async (next: boolean) => {
     if (next && !ssoStatus.enableEligible) {
       openTestSignIn({
-        reason: 'Run a successful test sign-in before enabling SSO.',
+        reason: 'Test sign-in required before enabling SSO.',
         onSuccess: async () => {
           setDraft((d) => ({ ...d, enabled: true }))
           await onSave({ enabled: true })

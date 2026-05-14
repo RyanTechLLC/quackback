@@ -216,7 +216,7 @@ function useDomainEnforcement(domain: VerifiedDomain, enforcementEligible: boole
     }
     if (!enforcementEligible) {
       openTestSignIn({
-        reason: `Run a successful test sign-in before enforcing SSO on ${domain.name}.`,
+        reason: `Test sign-in required before enforcing SSO on ${domain.name}.`,
         onSuccess: () => setEnforceConfirmOpen(true),
       })
       return
