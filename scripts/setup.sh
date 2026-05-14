@@ -101,6 +101,14 @@ bun run db:migrate
 echo -e "${GREEN}Database ready${NC}"
 echo ""
 
+# Build the widget bundle — the web app imports packages/widget/dist/browser.js
+# as a `?raw` string at the top of routes/api/widget/sdk.js.ts, so `bun run dev`
+# 500s on every route until this file exists.
+echo "Building widget bundle..."
+bun run --filter @quackback/widget build
+echo -e "${GREEN}Widget bundle built${NC}"
+echo ""
+
 # Done
 echo -e "${GREEN}Setup complete!${NC}"
 echo ""
