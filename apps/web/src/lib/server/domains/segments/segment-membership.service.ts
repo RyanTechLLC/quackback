@@ -35,7 +35,7 @@ export interface AddMemberInput {
   segmentId: SegmentId
   source: MembershipSource
   actor: AuditActor | null
-  request?: Request
+  headers?: Headers
 }
 
 export async function addMember(input: AddMemberInput): Promise<void> {
@@ -76,7 +76,7 @@ export async function addMember(input: AddMemberInput): Promise<void> {
     await recordAuditEvent({
       event: 'segment.member.added',
       actor: input.actor,
-      request: input.request,
+      headers: input.headers,
       target: { type: 'segment', id: input.segmentId },
       metadata: { principalId: input.principalId, source: input.source },
     })
@@ -87,7 +87,7 @@ export interface RemoveMemberInput {
   principalId: PrincipalId
   segmentId: SegmentId
   actor: AuditActor | null
-  request?: Request
+  headers?: Headers
 }
 
 export async function removeMember(input: RemoveMemberInput): Promise<void> {
@@ -103,7 +103,7 @@ export async function removeMember(input: RemoveMemberInput): Promise<void> {
     await recordAuditEvent({
       event: 'segment.member.removed',
       actor: input.actor,
-      request: input.request,
+      headers: input.headers,
       target: { type: 'segment', id: input.segmentId },
       metadata: { principalId: input.principalId },
     })

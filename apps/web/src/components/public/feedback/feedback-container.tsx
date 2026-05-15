@@ -53,7 +53,7 @@ export function FeedbackContainer({
   votedPostIds,
   currentBoard,
   currentSearch,
-  currentSort = 'top',
+  currentSort = 'trending',
   defaultBoardId,
   user,
   anonymousVotingEnabled = false,

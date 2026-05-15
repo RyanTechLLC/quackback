@@ -1,20 +1,14 @@
 /**
  * Audit log of security-sensitive admin actions.
  *
- * Append-only record of every change to authentication policy, access
- * controls, moderation decisions, and segment memberships. Read by
- * compliance reviewers and surfaced in the admin UI as a paginated,
- * filterable feed.
+ * Append-only record of every change to authentication policy, recovery
+ * codes, two-factor resets, and admin-driven role changes. Read by
+ * compliance reviewers (SOC2 CC6.2, CC7.2) and surfaced in the admin UI
+ * as a paginated, filterable feed.
  *
  * Actor identity is denormalised (email, role) so removed admins still
  * leave a coherent trace; `actor_user_id` is nullable so user deletion
  * preserves the audit row.
- *
- * NOTE: a fuller version of this schema lives on feat/sso-enforcement-v0.11
- * (introduced for SSO compliance). This file is the OSS-main-compatible
- * variant. When the SSO branch lands in main, reconcile by replacing this
- * with the broader SSO version — column shape is identical so it's a
- * symbol-level merge, not a data migration.
  */
 import { pgTable, text, timestamp, index, jsonb } from 'drizzle-orm/pg-core'
 import { typeIdWithDefault, typeIdColumnNullable } from '@quackback/ids/drizzle'
@@ -35,11 +29,11 @@ export const auditLog = pgTable(
     actorRole: text('actor_role'),
     actorIp: text('actor_ip'),
     actorUserAgent: text('actor_user_agent'),
-    /** Dotted taxonomy — see `AuditEventType` in apps/web/src/lib/server/audit/log.ts. */
+    /** Dotted taxonomy — see `AuditEventType`. */
     eventType: text('event_type').notNull(),
     /** 'success' | 'failure'. */
     eventOutcome: text('event_outcome').notNull().default('success'),
-    /** What was acted on — e.g. 'board', 'post', 'segment'. */
+    /** What was acted on — e.g. 'sso_verified_domain', 'user', 'settings'. */
     targetType: text('target_type'),
     targetId: text('target_id'),
     beforeValue: jsonb('before_value'),

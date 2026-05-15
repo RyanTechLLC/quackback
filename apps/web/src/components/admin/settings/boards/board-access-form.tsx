@@ -104,7 +104,7 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
                         <GlobeAltIcon className="h-4 w-4" />
                         <span className="font-medium">Public</span>
                       </div>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-xs text-muted-foreground">
                         Anyone can view this board on your portal, including unsigned visitors.
                         Signed-in users can vote, comment, and submit feedback.
                       </p>
@@ -124,7 +124,7 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
                         <UsersIcon className="h-4 w-4" />
                         <span className="font-medium">Authenticated</span>
                       </div>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-xs text-muted-foreground">
                         Any signed-in portal user can view this board. Hidden from anonymous
                         visitors and search indexes.
                       </p>
@@ -140,7 +140,7 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
                         <LockClosedIcon className="h-4 w-4" />
                         <span className="font-medium">Team only</span>
                       </div>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-xs text-muted-foreground">
                         Only admins and team members can view this board
                       </p>
                     </div>

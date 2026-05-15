@@ -47,7 +47,7 @@ export const Route = createFileRoute('/api/v1/segments/$slug/members')({
                 email: null,
                 role: auth.role,
               },
-              request,
+              headers: request.headers,
             })
           }
           return successResponse({ added: body.principalIds.length })
@@ -81,7 +81,7 @@ export const Route = createFileRoute('/api/v1/segments/$slug/members')({
                 email: null,
                 role: auth.role,
               },
-              request,
+              headers: request.headers,
             })
           }
           return successResponse({ removed: body.principalIds.length })
