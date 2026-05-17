@@ -26,6 +26,13 @@ const workspaceSchema = z
       .regex(/^[a-z0-9-]+$/)
       .optional(),
     useCase: useCaseSchema.optional(),
+    // Force the in-app onboarding wizard to be skipped. Set by the
+    // control-plane on CP-provisioned tenants where the operator did
+    // the equivalent of the wizard out-of-band (named the workspace,
+    // picked a plan) before the user ever sees the OSS portal. The
+    // reconciler stamps every setupState.step + completedAt so the
+    // /onboarding/* routes redirect straight to /admin.
+    onboardingComplete: z.boolean().optional(),
   })
   .strict()
 
