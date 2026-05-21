@@ -39,17 +39,29 @@ export function boardViewFilter(actor: Actor): SQL {
   }
   const memberIds = Array.from(actor.segmentIds) as string[]
   const isUser = actor.principalType === 'user'
+  // The segments branch can only match an actor who belongs to a segment.
+  // With no memberships, collapse it to a constant — this also avoids
+  // rendering `ANY(()::text[])`, which Postgres rejects. A non-empty list
+  // is built as `ARRAY[$1, …]` because a bare array in a `sql` template is
+  // spread as comma-separated params, not a single array literal.
+  const segmentsMatch =
+    memberIds.length > 0
+      ? sql`
+        ${boards.audience}->>'kind' = 'segments'
+        AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements_text(${boards.audience}->'segmentIds') seg
+          WHERE seg = ANY(ARRAY[${sql.join(
+            memberIds.map((id) => sql`${id}`),
+            sql`, `
+          )}]::text[])
+        )
+      `
+      : sql`false`
   return sql`
     (
       ${boards.audience}->>'kind' = 'public'
       OR (${boards.audience}->>'kind' = 'authenticated' AND ${isUser})
-      OR (
-        ${boards.audience}->>'kind' = 'segments'
-        AND EXISTS (
-          SELECT 1 FROM jsonb_array_elements_text(${boards.audience}->'segmentIds') seg
-          WHERE seg = ANY(${memberIds}::text[])
-        )
-      )
+      OR (${segmentsMatch})
     )
   `
 }

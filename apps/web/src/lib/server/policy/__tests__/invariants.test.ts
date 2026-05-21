@@ -141,7 +141,10 @@ describe('boardViewFilter — SQL shape', () => {
     // literal false alongside the kind check, so the branch is structurally present but
     // never satisfied. The important property is that the JSON kind comparison is present.
     expect(sql).toMatch(/'authenticated'/)
-    expect(sql).toMatch(/'segments'/)
+    // The segments branch collapses to a constant `false` for an actor with
+    // no memberships (anonymous always qualifies) — it can never match, so
+    // the `'segments'` kind comparison is correctly absent.
+    expect(sql).not.toMatch(/'segments'/)
   })
 
   it('portal-user actor binds memberIds as a parameter (anti SQL-injection)', () => {
@@ -164,6 +167,21 @@ describe('boardViewFilter — SQL shape', () => {
         expect(sql).not.toContain(p)
       }
     }
+  })
+
+  it('anonymous (empty memberIds) never renders an empty ANY(()...) — invalid SQL', () => {
+    // drizzle spreads a JS array in a `sql` template as comma-separated
+    // params, so an empty array would render `ANY(()::text[])`, which
+    // Postgres rejects. The segments branch must collapse to a constant
+    // instead. Guards the public-portal-while-logged-out crash.
+    const { sql } = toQueryShape(boardViewFilter(ANONYMOUS_ACTOR))
+    expect(sql).not.toContain('ANY(()')
+  })
+
+  it('portal-user with memberships renders a proper ARRAY[...] for the segments check', () => {
+    const { sql } = toQueryShape(boardViewFilter(actors.userInAlpha))
+    expect(sql).toContain('ANY(ARRAY[')
+    expect(sql).not.toContain('ANY(()')
   })
 
   it('predicate is stable across calls (same input → same SQL)', () => {
