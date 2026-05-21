@@ -50,6 +50,54 @@ describe('reconcileFileIntoDb', () => {
     expect(setup.steps.workspace).toBe(true)
   })
 
+  it('forces every setupState step + stamps completedAt when workspace.onboardingComplete=true', async () => {
+    const deps = baseDeps()
+    await reconcileFileIntoDb(
+      { workspace: { name: 'Acme', slug: 'acme', onboardingComplete: true } },
+      deps
+    )
+    const arg = (deps.updateSettings as ReturnType<typeof vi.fn>).mock.calls[0]![0]
+    const setup = JSON.parse(arg.setupState as string)
+    expect(setup.steps).toEqual({ core: true, workspace: true, boards: true })
+    expect(typeof setup.completedAt).toBe('string')
+    expect(new Date(setup.completedAt).toString()).not.toBe('Invalid Date')
+  })
+
+  it('preserves an existing completedAt rather than re-stamping on every reconcile', async () => {
+    const deps = baseDeps()
+    const stamped = '2026-01-01T00:00:00.000Z'
+    deps.readSettings = vi.fn(async () => ({
+      id: 'ws_1',
+      name: 'Acme',
+      slug: 'acme',
+      setupState: JSON.stringify({
+        version: 1,
+        steps: { core: true, workspace: true, boards: true },
+        completedAt: stamped,
+      }),
+      tierLimits: null,
+      featureFlags: null,
+      authConfig: null,
+      managedFieldPaths: ['workspace.name', 'workspace.slug'],
+      state: 'active' as const,
+    }))
+    await reconcileFileIntoDb(
+      { workspace: { name: 'Acme', slug: 'acme', onboardingComplete: true } },
+      deps
+    )
+    // The reconciler should detect a no-op and skip updateSettings entirely.
+    expect(deps.updateSettings).not.toHaveBeenCalled()
+  })
+
+  it('does NOT force boards step when workspace.onboardingComplete is absent', async () => {
+    const deps = baseDeps()
+    await reconcileFileIntoDb({ workspace: { name: 'Acme', slug: 'acme' } }, deps)
+    const arg = (deps.updateSettings as ReturnType<typeof vi.fn>).mock.calls[0]![0]
+    const setup = JSON.parse(arg.setupState as string)
+    expect(setup.steps.boards).toBe(false)
+    expect(setup.completedAt).toBeUndefined()
+  })
+
   it('writes tierLimits as a JSON-encoded string', async () => {
     const deps = baseDeps()
     await reconcileFileIntoDb({ tierLimits: { maxBoards: 7 } }, deps)

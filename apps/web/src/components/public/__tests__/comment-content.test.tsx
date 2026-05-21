@@ -151,4 +151,24 @@ describe('<CommentContent>', () => {
     // RichTextContent's default branch dropping unrecognised leaf nodes.
     expect(container.textContent).toContain('👍')
   })
+
+  it('renders emoji nodes that only carry a shortcode name (TipTap omits the Unicode char in JSON)', () => {
+    // @tiptap/extension-emoji persists `{ name: 'tada' }` without `emoji`; the
+    // renderer must look the Unicode char up from the bundled emoji set so
+    // existing stored comments do not show as empty spans.
+    const json = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Shipped ' },
+            { type: 'emoji', attrs: { name: 'tada' } },
+          ],
+        },
+      ],
+    }
+    const { container } = render(<CommentContent content="Shipped :tada:" contentJson={json} />)
+    expect(container.textContent).toContain('🎉')
+  })
 })

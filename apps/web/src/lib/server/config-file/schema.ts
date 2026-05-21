@@ -26,6 +26,13 @@ const workspaceSchema = z
       .regex(/^[a-z0-9-]+$/)
       .optional(),
     useCase: useCaseSchema.optional(),
+    // Force the in-app onboarding wizard to be skipped. Set by the
+    // control-plane on CP-provisioned tenants where the operator did
+    // the equivalent of the wizard out-of-band (named the workspace,
+    // picked a plan) before the user ever sees the OSS portal. The
+    // reconciler stamps every setupState.step + completedAt so the
+    // /onboarding/* routes redirect straight to /admin.
+    onboardingComplete: z.boolean().optional(),
   })
   .strict()
 
@@ -80,6 +87,13 @@ const oauthProvidersSchema = z
     google: z.boolean().optional(),
     github: z.boolean().optional(),
     password: z.boolean().optional(),
+    // `magicLink` is the email-link sign-in option the team-login form
+    // surfaces alongside (or instead of) password. Defaults to false in
+    // PortalAuthForm's `?? false` fallback, so a managed-cloud control
+    // plane has to declare it explicitly to push magic-link as the
+    // primary admin auth surface. Self-host tenants keep the legacy
+    // default unless their declarative config opts in.
+    magicLink: z.boolean().optional(),
   })
   .strict()
 
