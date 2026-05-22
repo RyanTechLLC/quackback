@@ -1,12 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import {
-  PlusIcon,
-  PencilIcon,
-  TrashIcon,
-  AdjustmentsHorizontalIcon,
-} from '@heroicons/react/24/solid'
+import { PlusIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -26,7 +21,6 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
-import { EmptyState } from '@/components/shared/empty-state'
 import { SettingsCard } from '@/components/admin/settings/settings-card'
 import {
   useCreateUserAttribute,
@@ -422,20 +416,7 @@ export function UserAttributesList({ initialAttributes }: UserAttributesListProp
             </p>
           </div>
         </div>
-        {attributes.length === 0 ? (
-          <EmptyState
-            icon={AdjustmentsHorizontalIcon}
-            title="No attributes yet"
-            description="Add custom user attributes to enable richer segmentation rules."
-            action={
-              <Button size="sm" onClick={() => setCreateOpen(true)}>
-                <PlusIcon className="h-4 w-4 mr-1.5" />
-                New attribute
-              </Button>
-            }
-            className="py-10"
-          />
-        ) : (
+        {attributes.length > 0 && (
           <div>
             {attributes.map((attr) => (
               <AttributeRow

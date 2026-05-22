@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { PlusIcon, XMarkIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -168,30 +168,35 @@ function RuleConditionRow({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectGroup>
-            <SelectLabel className="text-[10px] uppercase tracking-wider px-2 py-1.5">
-              Built-in fields
-            </SelectLabel>
-            {BUILTIN_FIELDS.filter((f) => f.group === 'attribute').map((field) => (
-              <SelectItem key={field.key} value={field.key} className="text-xs">
-                {field.label}
-              </SelectItem>
-            ))}
-            <SelectItem value="metadata_key" className="text-xs">
-              Custom Metadata Key
-            </SelectItem>
-          </SelectGroup>
-          <SelectSeparator />
-          <SelectGroup>
-            <SelectLabel className="text-[10px] uppercase tracking-wider px-2 py-1.5">
-              Activity
-            </SelectLabel>
-            {BUILTIN_FIELDS.filter((f) => f.group === 'activity').map((field) => (
-              <SelectItem key={field.key} value={field.key} className="text-xs">
-                {field.label}
-              </SelectItem>
-            ))}
-          </SelectGroup>
+          {(
+            [
+              { group: 'attribute', label: 'Built-in fields' },
+              { group: 'account', label: 'Account' },
+              { group: 'activity', label: 'Activity' },
+            ] as const
+          ).map(({ group, label }, i) => {
+            const fields = BUILTIN_FIELDS.filter((f) => f.group === group)
+            return (
+              <React.Fragment key={group}>
+                {i > 0 && <SelectSeparator />}
+                <SelectGroup>
+                  <SelectLabel className="text-[10px] uppercase tracking-wider px-2 py-1.5">
+                    {label}
+                  </SelectLabel>
+                  {fields.map((field) => (
+                    <SelectItem key={field.key} value={field.key} className="text-xs">
+                      {field.label}
+                    </SelectItem>
+                  ))}
+                  {group === 'attribute' && (
+                    <SelectItem value="metadata_key" className="text-xs">
+                      Custom Metadata Key
+                    </SelectItem>
+                  )}
+                </SelectGroup>
+              </React.Fragment>
+            )
+          })}
           {customAttributes && customAttributes.length > 0 && (
             <>
               <SelectSeparator />

@@ -30,9 +30,10 @@ export interface BuiltinField {
   /**
    * Logical grouping:
    * - 'attribute': a stored property on the user record (shown in User Attributes view)
-   * - 'activity': a computed count or derived value (segment rules only, not shown in attributes view)
+   * - 'account': account-level facts (principal type, account age) — segment rules only
+   * - 'activity': engagement counts — segment rules only
    */
-  group: 'attribute' | 'activity'
+  group: 'attribute' | 'account' | 'activity'
   /** Short description shown as a tooltip or helper text */
   description?: string
   /** Enum fields: list of accepted values rendered as a select input */
@@ -138,7 +139,7 @@ export const BUILTIN_FIELDS = [
     key: 'principal_type',
     label: 'Principal Type',
     type: 'string',
-    group: 'attribute',
+    group: 'account',
     description: 'Whether the principal is a human user or an anonymous visitor.',
     allowedValues: ['user', 'anonymous'] as const,
     // evaluator: only eq/neq via OPERATOR_SQL; is_set/is_not_set return TRUE/FALSE (trivially useless)
@@ -151,7 +152,7 @@ export const BUILTIN_FIELDS = [
     key: 'created_at_days_ago',
     label: 'Account Age (days)',
     type: 'number',
-    group: 'activity',
+    group: 'account',
     description: 'How many days ago the principal was created.',
     // evaluator: all OPERATOR_SQL (gt/gte/lt/lte/eq/neq) — no is_set/is_not_set
     operators: [

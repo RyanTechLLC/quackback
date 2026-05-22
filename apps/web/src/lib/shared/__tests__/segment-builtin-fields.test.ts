@@ -11,7 +11,7 @@ import {
 import type { SegmentRuleAttribute } from '@/lib/server/db'
 
 const ALLOWED_TYPES: ReadonlyArray<BuiltinField['type']> = ['string', 'number', 'boolean', 'date']
-const ALLOWED_GROUPS: ReadonlyArray<BuiltinField['group']> = ['attribute', 'activity']
+const ALLOWED_GROUPS: ReadonlyArray<BuiltinField['group']> = ['attribute', 'account', 'activity']
 
 describe('BUILTIN_FIELDS registry well-formedness', () => {
   it('is a non-empty array', () => {
@@ -106,25 +106,39 @@ describe('BUILTIN_FIELDS registry well-formedness', () => {
     }
   })
 
-  it('attribute-group fields are name, display_name, email, email_verified, principal_type', () => {
+  it('attribute-group fields are name, display_name, email, email_verified (genuine user attributes)', () => {
     const attributeKeys = BUILTIN_FIELDS.filter((f) => f.group === 'attribute').map((f) => f.key)
     expect(attributeKeys).toEqual(
-      expect.arrayContaining(['name', 'display_name', 'email', 'email_verified', 'principal_type'])
+      expect.arrayContaining(['name', 'display_name', 'email', 'email_verified'])
     )
+    expect(attributeKeys).not.toContain('principal_type')
     expect(attributeKeys).not.toContain('post_count')
     expect(attributeKeys).not.toContain('vote_count')
     expect(attributeKeys).not.toContain('comment_count')
     expect(attributeKeys).not.toContain('created_at_days_ago')
   })
 
-  it('activity-group fields are created_at_days_ago, post_count, vote_count, comment_count', () => {
+  it('account-group fields are principal_type and created_at_days_ago', () => {
+    const accountKeys = BUILTIN_FIELDS.filter((f) => f.group === 'account').map((f) => f.key)
+    expect(accountKeys).toEqual(expect.arrayContaining(['principal_type', 'created_at_days_ago']))
+    expect(accountKeys).not.toContain('name')
+    expect(accountKeys).not.toContain('email')
+    expect(accountKeys).not.toContain('email_verified')
+    expect(accountKeys).not.toContain('post_count')
+    expect(accountKeys).not.toContain('vote_count')
+    expect(accountKeys).not.toContain('comment_count')
+  })
+
+  it('activity-group fields are post_count, vote_count, comment_count', () => {
     const activityKeys = BUILTIN_FIELDS.filter((f) => f.group === 'activity').map((f) => f.key)
     expect(activityKeys).toEqual(
-      expect.arrayContaining(['created_at_days_ago', 'post_count', 'vote_count', 'comment_count'])
+      expect.arrayContaining(['post_count', 'vote_count', 'comment_count'])
     )
     expect(activityKeys).not.toContain('name')
     expect(activityKeys).not.toContain('email')
     expect(activityKeys).not.toContain('email_verified')
+    expect(activityKeys).not.toContain('principal_type')
+    expect(activityKeys).not.toContain('created_at_days_ago')
   })
 })
 
