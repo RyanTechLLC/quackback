@@ -3,6 +3,7 @@ import { Link, useRouterState, useRouteContext } from '@tanstack/react-router'
 import {
   Cog6ToothIcon,
   UsersIcon,
+  UserGroupIcon,
   Squares2X2Icon,
   PaintBrushIcon,
   PuzzlePieceIcon,
@@ -80,12 +81,17 @@ export function buildNavSections(flags?: { helpCenter?: boolean }): NavSection[]
   }
 
   sections.push({
-    label: 'End Users',
+    label: 'People',
     items: [
       {
         label: 'User Attributes',
         to: '/admin/settings/user-attributes',
         icon: AdjustmentsHorizontalIcon,
+      },
+      {
+        label: 'Segments',
+        to: '/admin/settings/segments',
+        icon: UserGroupIcon,
       },
     ],
   })
