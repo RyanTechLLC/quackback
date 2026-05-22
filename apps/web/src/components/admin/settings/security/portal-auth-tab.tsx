@@ -1,4 +1,4 @@
-import { useState, useTransition, useCallback } from 'react'
+import { useState, useTransition, useRef } from 'react'
 import { useRouter } from '@tanstack/react-router'
 import {
   ArrowPathIcon,
@@ -92,41 +92,96 @@ export function PortalAuthTab({
   const [saving, setSaving] = useState(false)
   const [oauthState, setOauthState] = useState<Record<string, boolean | undefined>>(initialOauth)
 
-  // --- Portal visibility state ---
+  // --- Portal visibility + allowed-domains: shared busy lock ---
+  //
+  // A single `accessBusy` flag covers both visibility and domain saves so
+  // the two fields can never race. Refs hold the current logical values so
+  // that every call to `applyAccess` reads fresh state regardless of when
+  // the closure was created — no stale capture is possible.
+
   const currentVisibility = (portalConfig.access?.visibility ?? 'public') as 'public' | 'private'
   const [visibility, setVisibility] = useState<'public' | 'private'>(currentVisibility)
-  const [visibilitySaving, setVisibilitySaving] = useState(false)
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [pendingVisibility, setPendingVisibility] = useState<'public' | 'private' | null>(null)
+  const visibilityRef = useRef(visibility)
+  visibilityRef.current = visibility
 
-  const isVisibilityBusy = visibilitySaving || isPending
-
-  // --- Allowed email domains state ---
   const [allowedDomains, setAllowedDomains] = useState<string[]>(
     portalConfig.access?.allowedDomains ?? []
   )
+  const allowedDomainsRef = useRef(allowedDomains)
+  allowedDomainsRef.current = allowedDomains
+
+  const [accessBusy, setAccessBusy] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [pendingVisibility, setPendingVisibility] = useState<'public' | 'private' | null>(null)
   const [domainInput, setDomainInput] = useState('')
-  const [domainsSaving, setDomainsSaving] = useState(false)
   const [domainInputError, setDomainInputError] = useState<string | null>(null)
 
-  const saveDomains = useCallback(
-    async (nextDomains: string[]) => {
-      const prev = allowedDomains
-      setAllowedDomains(nextDomains)
-      setDomainsSaving(true)
-      try {
-        await updatePortalAccessFn({ data: { visibility, allowedDomains: nextDomains } })
-        startTransition(() => {
-          router.invalidate()
-        })
-      } catch {
-        setAllowedDomains(prev)
-      } finally {
-        setDomainsSaving(false)
-      }
-    },
-    [allowedDomains, visibility, router, startTransition]
-  )
+  const isAccessBusy = accessBusy || isPending
+
+  /**
+   * Single save path for both visibility and domain changes.
+   *
+   * `nextVisibility` and `nextDomains` are always supplied explicitly by the
+   * caller — they represent the intended new state for the field being
+   * changed. The OTHER field is read from its ref so it reflects the latest
+   * committed value rather than anything captured in a stale closure. This
+   * ensures:
+   *  - No two saves overlap (`accessBusy` gates both controls).
+   *  - Neither field persists a stale value: the caller owns its field, and
+   *    the ref owns the peer field.
+   */
+  async function applyAccess(nextVisibility: 'public' | 'private', nextDomains: string[]) {
+    const prevVisibility = visibilityRef.current
+    const prevDomains = allowedDomainsRef.current
+
+    // Optimistic update
+    setVisibility(nextVisibility)
+    setAllowedDomains(nextDomains)
+    setAccessBusy(true)
+
+    try {
+      await updatePortalAccessFn({
+        data: { visibility: nextVisibility, allowedDomains: nextDomains },
+      })
+      startTransition(() => {
+        router.invalidate()
+      })
+    } catch {
+      // Revert both fields on error
+      setVisibility(prevVisibility)
+      setAllowedDomains(prevDomains)
+    } finally {
+      setAccessBusy(false)
+    }
+  }
+
+  function handleVisibilitySelect(next: 'public' | 'private') {
+    if (next === visibilityRef.current || isAccessBusy) return
+
+    if (next === 'private') {
+      setPendingVisibility('private')
+      setDialogOpen(true)
+    } else {
+      // Changing to public: keep current domains (ref) alongside new visibility
+      void applyAccess('public', allowedDomainsRef.current)
+    }
+  }
+
+  function handleConfirmPrivate() {
+    setDialogOpen(false)
+    if (pendingVisibility === 'private') {
+      setPendingVisibility(null)
+      // Changing to private: keep current domains (ref) alongside new visibility
+      void applyAccess('private', allowedDomainsRef.current)
+    }
+  }
+
+  function handleCancelDialog(open: boolean) {
+    if (!open) {
+      setPendingVisibility(null)
+    }
+    setDialogOpen(open)
+  }
 
   function handleAddDomain() {
     const raw = domainInput.trim().toLowerCase().replace(/^@/, '')
@@ -138,18 +193,23 @@ export function PortalAuthTab({
       return
     }
 
-    if (allowedDomains.includes(raw)) {
+    if (allowedDomainsRef.current.includes(raw)) {
       setDomainInputError('Domain already in the list')
       return
     }
 
     setDomainInputError(null)
     setDomainInput('')
-    void saveDomains([...allowedDomains, raw])
+    // Keep current visibility (ref); update domains
+    void applyAccess(visibilityRef.current, [...allowedDomainsRef.current, raw])
   }
 
   function handleRemoveDomain(domain: string) {
-    void saveDomains(allowedDomains.filter((d) => d !== domain))
+    // Keep current visibility (ref); update domains
+    void applyAccess(
+      visibilityRef.current,
+      allowedDomainsRef.current.filter((d) => d !== domain)
+    )
   }
 
   function handleDomainKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -157,49 +217,6 @@ export function PortalAuthTab({
       e.preventDefault()
       handleAddDomain()
     }
-  }
-
-  async function applyVisibility(next: 'public' | 'private') {
-    const prev = visibility
-    setVisibility(next)
-    setVisibilitySaving(true)
-    try {
-      await updatePortalAccessFn({ data: { visibility: next, allowedDomains } })
-      startTransition(() => {
-        router.invalidate()
-      })
-    } catch {
-      // Revert optimistic update on error
-      setVisibility(prev)
-    } finally {
-      setVisibilitySaving(false)
-    }
-  }
-
-  function handleVisibilitySelect(next: 'public' | 'private') {
-    if (next === visibility || isVisibilityBusy) return
-
-    if (next === 'private') {
-      setPendingVisibility('private')
-      setDialogOpen(true)
-    } else {
-      void applyVisibility('public')
-    }
-  }
-
-  function handleConfirmPrivate() {
-    setDialogOpen(false)
-    if (pendingVisibility === 'private') {
-      setPendingVisibility(null)
-      void applyVisibility('private')
-    }
-  }
-
-  function handleCancelDialog(open: boolean) {
-    if (!open) {
-      setPendingVisibility(null)
-    }
-    setDialogOpen(open)
   }
 
   const { managedFieldPaths = [] } =
@@ -267,7 +284,7 @@ export function PortalAuthTab({
 
   return (
     <div className="space-y-6">
-      {/* Portal visibility — phase 1 */}
+      {/* Portal visibility — radio + (when private) allowed-domains editor */}
       <SettingsCard
         title="Portal visibility"
         description="Choose whether your portal is open to anyone or restricted to authorized visitors."
@@ -281,13 +298,13 @@ export function PortalAuthTab({
                 key={option.value}
                 type="button"
                 onClick={() => handleVisibilitySelect(option.value)}
-                disabled={isVisibilityBusy}
+                disabled={isAccessBusy}
                 className={cn(
                   'relative flex flex-col gap-2 rounded-lg border p-4 text-left transition-colors',
                   isSelected
                     ? 'border-primary bg-primary/5 ring-1 ring-primary'
                     : 'border-border/50 bg-card hover:border-border hover:bg-muted/30',
-                  isVisibilityBusy && 'cursor-not-allowed opacity-60'
+                  isAccessBusy && 'cursor-not-allowed opacity-60'
                 )}
               >
                 <div className="flex items-center gap-2">
@@ -298,7 +315,7 @@ export function PortalAuthTab({
                     )}
                   />
                   <span className="text-sm font-medium">{option.label}</span>
-                  {visibilitySaving && isSelected && (
+                  {accessBusy && isSelected && (
                     <ArrowPathIcon className="ml-auto h-3.5 w-3.5 animate-spin text-muted-foreground" />
                   )}
                 </div>
@@ -307,15 +324,17 @@ export function PortalAuthTab({
             )
           })}
         </div>
-      </SettingsCard>
 
-      {/* Allowed email domains — only meaningful for a private portal */}
-      {visibility === 'private' && (
-        <SettingsCard
-          title="Allowed email domains"
-          description="Signed-in users with a verified email on these domains can access the private portal."
-        >
-          <div className="space-y-4">
+        {/* Allowed email domains — only meaningful when the portal is private */}
+        {visibility === 'private' && (
+          <div className="mt-6 border-t border-border/50 pt-6 space-y-4">
+            <div>
+              <p className="text-sm font-medium">Allowed email domains</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Signed-in users with a verified email on these domains can access the private
+                portal.
+              </p>
+            </div>
             <div className="flex gap-2">
               <div className="flex-1">
                 <Input
@@ -326,7 +345,7 @@ export function PortalAuthTab({
                   }}
                   onKeyDown={handleDomainKeyDown}
                   placeholder="acme.com"
-                  disabled={domainsSaving}
+                  disabled={isAccessBusy}
                   aria-label="Add email domain"
                   aria-invalid={!!domainInputError}
                   className={cn(domainInputError && 'border-destructive')}
@@ -340,13 +359,13 @@ export function PortalAuthTab({
                 variant="outline"
                 size="sm"
                 onClick={handleAddDomain}
-                disabled={!domainInput.trim() || domainsSaving}
+                disabled={!domainInput.trim() || isAccessBusy}
                 className="h-9 shrink-0"
               >
                 <PlusIcon className="mr-1 h-3.5 w-3.5" />
                 Add
               </Button>
-              {domainsSaving && (
+              {accessBusy && (
                 <div className="flex items-center">
                   <ArrowPathIcon className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                 </div>
@@ -364,7 +383,7 @@ export function PortalAuthTab({
                     <button
                       type="button"
                       onClick={() => handleRemoveDomain(domain)}
-                      disabled={domainsSaving}
+                      disabled={isAccessBusy}
                       className="ml-2 rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-40 transition-colors"
                       aria-label={`Remove ${domain}`}
                     >
@@ -379,8 +398,8 @@ export function PortalAuthTab({
               </p>
             )}
           </div>
-        </SettingsCard>
-      )}
+        )}
+      </SettingsCard>
 
       <PortalPrivacyDialog
         open={dialogOpen}
@@ -528,8 +547,8 @@ interface CustomOidcCardProps {
  * Dedicated card for custom OIDC. Separated from the alphabetical social
  * grid because bring-your-own-IdP is a different shape of setup than a
  * social tile — there's a discovery URL, a client secret, and tier gating
- * to surface. Industry convention (Linear, Notion, Auth0, Clerk, WorkOS,
- * Stytch) splits Social vs Enterprise SSO into distinct sections.
+ * to surface. Splitting Social vs Enterprise SSO into distinct sections
+ * follows the same convention used across most auth-focused admin UIs.
  *
  * Three states drive the layout, in priority order:
  *  - `!tierEnabled`: tier-locked. Lock badge + upgrade hint; Configure is
