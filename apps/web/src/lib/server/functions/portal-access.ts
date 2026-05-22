@@ -29,11 +29,6 @@ import type { UserId } from '@quackback/ids'
  * included in the response — this is a public RPC endpoint and
  * returning the allowlist would recreate the exact exposure being
  * fixed here.
- *
- * Non-sensitive display data needed by the blocked overlay (workspace
- * name, logo URL, OAuth config) is returned alongside the decision
- * because those values are already public and the overlay needs them
- * without a separate round-trip.
  */
 export type PortalAccessDecision =
   | {
