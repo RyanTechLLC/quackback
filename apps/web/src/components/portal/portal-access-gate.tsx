@@ -11,7 +11,6 @@
  * After a successful sign-in the router is invalidated so the _portal loader
  * re-runs; if the visitor is now authorized, the real portal replaces this.
  */
-import { LockClosedIcon } from '@heroicons/react/24/solid'
 import { useRouter } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -131,12 +130,13 @@ function GateCard({ reason, workspaceName, logoUrl, authConfig }: GateCardProps)
   return (
     <>
       <div className="rounded-xl border bg-card shadow-lg p-8 w-full max-w-sm text-center space-y-4">
-        {/* Logo or lock icon */}
+        {/* Org logo, or the workspace initial as a branded fallback (matches
+            the portal header — never a generic icon). */}
         {logoUrl ? (
           <img src={logoUrl} alt={workspaceName} className="mx-auto h-12 w-auto object-contain" />
         ) : (
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-            <LockClosedIcon className="h-6 w-6 text-muted-foreground" aria-hidden />
+          <div className="mx-auto flex h-12 w-12 items-center justify-center [border-radius:calc(var(--radius)*0.6)] bg-primary text-lg font-semibold text-primary-foreground">
+            {workspaceName.charAt(0).toUpperCase()}
           </div>
         )}
 
