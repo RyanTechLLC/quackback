@@ -169,7 +169,10 @@ function RuleConditionRow({
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
-            {BUILTIN_FIELDS.map((field) => (
+            <SelectLabel className="text-[10px] uppercase tracking-wider px-2 py-1.5">
+              Built-in fields
+            </SelectLabel>
+            {BUILTIN_FIELDS.filter((f) => f.group === 'attribute').map((field) => (
               <SelectItem key={field.key} value={field.key} className="text-xs">
                 {field.label}
               </SelectItem>
@@ -177,6 +180,17 @@ function RuleConditionRow({
             <SelectItem value="metadata_key" className="text-xs">
               Custom Metadata Key
             </SelectItem>
+          </SelectGroup>
+          <SelectSeparator />
+          <SelectGroup>
+            <SelectLabel className="text-[10px] uppercase tracking-wider px-2 py-1.5">
+              Activity
+            </SelectLabel>
+            {BUILTIN_FIELDS.filter((f) => f.group === 'activity').map((field) => (
+              <SelectItem key={field.key} value={field.key} className="text-xs">
+                {field.label}
+              </SelectItem>
+            ))}
           </SelectGroup>
           {customAttributes && customAttributes.length > 0 && (
             <>

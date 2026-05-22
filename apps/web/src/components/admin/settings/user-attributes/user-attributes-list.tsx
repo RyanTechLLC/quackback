@@ -402,11 +402,11 @@ export function UserAttributesList({ initialAttributes }: UserAttributesListProp
         <div className="mb-3">
           <h3 className="text-sm font-medium text-foreground">Built-in fields</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Platform fields available in all segment rules. Read-only.
+            Platform attributes stored on every user. Read-only.
           </p>
         </div>
-        <div className="divide-y divide-border/50 rounded-lg border border-border/40 px-4">
-          {BUILTIN_FIELDS.map((field) => (
+        <div>
+          {BUILTIN_FIELDS.filter((f) => f.group === 'attribute').map((field) => (
             <BuiltinFieldRow key={field.key} field={field} />
           ))}
         </div>
@@ -436,7 +436,7 @@ export function UserAttributesList({ initialAttributes }: UserAttributesListProp
             className="py-10"
           />
         ) : (
-          <div className="divide-y divide-border/50 rounded-lg border border-border/40 px-4">
+          <div>
             {attributes.map((attr) => (
               <AttributeRow
                 key={attr.id}

@@ -27,6 +27,12 @@ export interface BuiltinField {
   label: string
   /** Data type — drives operator choices and input control rendering */
   type: 'string' | 'number' | 'boolean' | 'date'
+  /**
+   * Logical grouping:
+   * - 'attribute': a stored property on the user record (shown in User Attributes view)
+   * - 'activity': a computed count or derived value (segment rules only, not shown in attributes view)
+   */
+  group: 'attribute' | 'activity'
   /** Short description shown as a tooltip or helper text */
   description?: string
   /** Enum fields: list of accepted values rendered as a select input */
@@ -99,6 +105,7 @@ export const BUILTIN_FIELDS = [
     key: 'name',
     label: 'Name',
     type: 'string',
+    group: 'attribute',
     description: "The user's display name from their profile.",
     // evaluator: eq/neq/contains/starts_with/ends_with/is_set/is_not_set — matches string default
   },
@@ -106,28 +113,24 @@ export const BUILTIN_FIELDS = [
     key: 'display_name',
     label: 'Display Name',
     type: 'string',
+    group: 'attribute',
     description:
       "The principal's display name. May differ from the user name for service principals.",
     // evaluator: eq/neq/contains/starts_with/ends_with/is_set/is_not_set — matches string default
   },
   {
-    key: 'email_domain',
-    label: 'Email Domain',
+    key: 'email',
+    label: 'Email',
     type: 'string',
-    description: 'The domain part of the email address (e.g. "acme.com").',
-    // evaluator only handles eq, neq, ends_with — no contains/starts_with
-    operators: [
-      { value: 'eq', label: 'equals' },
-      { value: 'neq', label: 'not equals' },
-      { value: 'ends_with', label: 'ends with' },
-      { value: 'is_set', label: 'is set' },
-      { value: 'is_not_set', label: 'is not set' },
-    ],
+    group: 'attribute',
+    description: "The user's email address.",
+    // evaluator: full string default — eq/neq/contains/starts_with/ends_with/is_set/is_not_set
   },
   {
     key: 'email_verified',
     label: 'Email Verified',
     type: 'boolean',
+    group: 'attribute',
     description: 'Whether the user has verified their email address.',
     // evaluator: eq only (plus is_set/is_not_set) — matches boolean default
   },
@@ -135,6 +138,7 @@ export const BUILTIN_FIELDS = [
     key: 'principal_type',
     label: 'Principal Type',
     type: 'string',
+    group: 'attribute',
     description: 'Whether the principal is a human user or an anonymous visitor.',
     allowedValues: ['user', 'anonymous'] as const,
     // evaluator: only eq/neq via OPERATOR_SQL; is_set/is_not_set return TRUE/FALSE (trivially useless)
@@ -147,6 +151,7 @@ export const BUILTIN_FIELDS = [
     key: 'created_at_days_ago',
     label: 'Account Age (days)',
     type: 'number',
+    group: 'activity',
     description: 'How many days ago the principal was created.',
     // evaluator: all OPERATOR_SQL (gt/gte/lt/lte/eq/neq) — no is_set/is_not_set
     operators: [
@@ -162,6 +167,7 @@ export const BUILTIN_FIELDS = [
     key: 'post_count',
     label: 'Post Count',
     type: 'number',
+    group: 'activity',
     description: 'Number of feedback posts the user has submitted.',
     // evaluator: OPERATOR_SQL + is_set (> 0) / is_not_set (= 0)
     operators: [
@@ -178,6 +184,7 @@ export const BUILTIN_FIELDS = [
     key: 'vote_count',
     label: 'Vote Count',
     type: 'number',
+    group: 'activity',
     description: 'Number of votes the user has cast.',
     operators: [
       { value: 'gt', label: 'greater than' },
@@ -193,6 +200,7 @@ export const BUILTIN_FIELDS = [
     key: 'comment_count',
     label: 'Comment Count',
     type: 'number',
+    group: 'activity',
     description: 'Number of comments the user has made.',
     operators: [
       { value: 'gt', label: 'greater than' },

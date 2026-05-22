@@ -267,3 +267,51 @@ describe('evaluator — principal_type attribute', () => {
     expect(capturedSql).toContain('FALSE')
   })
 })
+
+describe('evaluator — email attribute (full address matching)', () => {
+  it('eq operator produces u.email = value', async () => {
+    mockSegment = makeSegment([{ attribute: 'email', operator: 'eq', value: 'alice@example.com' }])
+    await evaluateDynamicSegment('segment_test' as never)
+    expect(capturedSql).toContain('u.email')
+    expect(capturedSql).toContain('=')
+    expect(capturedSql).toContain('alice@example.com')
+  })
+
+  it('contains operator produces u.email ILIKE %value%', async () => {
+    mockSegment = makeSegment([{ attribute: 'email', operator: 'contains', value: 'acme' }])
+    await evaluateDynamicSegment('segment_test' as never)
+    expect(capturedSql).toContain('u.email')
+    expect(capturedSql).toContain('ILIKE')
+    expect(capturedSql).toContain('%acme%')
+  })
+
+  it('starts_with operator produces u.email ILIKE value%', async () => {
+    mockSegment = makeSegment([{ attribute: 'email', operator: 'starts_with', value: 'admin' }])
+    await evaluateDynamicSegment('segment_test' as never)
+    expect(capturedSql).toContain('u.email')
+    expect(capturedSql).toContain('ILIKE')
+    expect(capturedSql).toContain('admin%')
+  })
+
+  it('ends_with operator produces u.email ILIKE %value', async () => {
+    mockSegment = makeSegment([{ attribute: 'email', operator: 'ends_with', value: '@acme.com' }])
+    await evaluateDynamicSegment('segment_test' as never)
+    expect(capturedSql).toContain('u.email')
+    expect(capturedSql).toContain('ILIKE')
+    expect(capturedSql).toContain('%@acme.com')
+  })
+
+  it('is_set produces u.email IS NOT NULL', async () => {
+    mockSegment = makeSegment([{ attribute: 'email', operator: 'is_set' }])
+    await evaluateDynamicSegment('segment_test' as never)
+    expect(capturedSql).toContain('u.email')
+    expect(capturedSql).toContain('IS NOT NULL')
+  })
+
+  it('is_not_set produces u.email IS NULL', async () => {
+    mockSegment = makeSegment([{ attribute: 'email', operator: 'is_not_set' }])
+    await evaluateDynamicSegment('segment_test' as never)
+    expect(capturedSql).toContain('u.email')
+    expect(capturedSql).toContain('IS NULL')
+  })
+})

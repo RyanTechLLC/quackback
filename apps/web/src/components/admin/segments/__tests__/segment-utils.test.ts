@@ -75,15 +75,15 @@ describe('getAutoColor', () => {
 describe('serializeCondition', () => {
   it('should serialize a built-in string condition', () => {
     const condition: RuleCondition = {
-      attribute: 'email_domain',
+      attribute: 'email',
       operator: 'eq',
-      value: 'example.com',
+      value: 'alice@example.com',
     }
     const result = serializeCondition(condition)
     expect(result).toEqual({
-      attribute: 'email_domain',
+      attribute: 'email',
       operator: 'eq',
-      value: 'example.com',
+      value: 'alice@example.com',
       metadataKey: undefined,
     })
   })
@@ -120,7 +120,7 @@ describe('serializeCondition', () => {
 
   it('should serialize is_set operator without value', () => {
     const condition: RuleCondition = {
-      attribute: 'email_domain',
+      attribute: 'email',
       operator: 'is_set',
       value: '',
     }
@@ -130,7 +130,7 @@ describe('serializeCondition', () => {
 
   it('should serialize is_not_set operator without value', () => {
     const condition: RuleCondition = {
-      attribute: 'email_domain',
+      attribute: 'email',
       operator: 'is_not_set',
       value: '',
     }
@@ -187,9 +187,9 @@ describe('serializeCondition', () => {
 
   it('should preserve metadataKey for non-custom attributes', () => {
     const condition: RuleCondition = {
-      attribute: 'email_domain',
+      attribute: 'email',
       operator: 'eq',
-      value: 'test.com',
+      value: 'test@example.com',
       metadataKey: 'some_key',
     }
     const result = serializeCondition(condition)
@@ -204,15 +204,15 @@ describe('serializeCondition', () => {
 describe('deserializeCondition', () => {
   it('should deserialize a built-in condition', () => {
     const condition: SegmentCondition = {
-      attribute: 'email_domain',
+      attribute: 'email',
       operator: 'eq',
-      value: 'example.com',
+      value: 'alice@example.com',
     }
     const result = deserializeCondition(condition)
     expect(result).toEqual({
-      attribute: 'email_domain',
+      attribute: 'email',
       operator: 'eq',
-      value: 'example.com',
+      value: 'alice@example.com',
       metadataKey: undefined,
     })
   })
@@ -245,7 +245,7 @@ describe('deserializeCondition', () => {
 
   it('should handle null/undefined values as empty string', () => {
     const condition: SegmentCondition = {
-      attribute: 'email_domain',
+      attribute: 'email',
       operator: 'is_set',
     }
     const result = deserializeCondition(condition)
@@ -368,15 +368,15 @@ describe('deserializeCondition — new built-in fields round-trip', () => {
 })
 
 describe('backward compatibility — legacy attributes still deserialize', () => {
-  it('deserializes a saved email_domain condition without error', () => {
+  it('deserializes a saved email condition (full address match)', () => {
     const c: SegmentCondition = {
-      attribute: 'email_domain',
+      attribute: 'email',
       operator: 'ends_with',
-      value: 'acme.com',
+      value: '@acme.com',
     }
     const d = deserializeCondition(c)
-    expect(d.attribute).toBe('email_domain')
-    expect(d.value).toBe('acme.com')
+    expect(d.attribute).toBe('email')
+    expect(d.value).toBe('@acme.com')
   })
 
   it('deserializes a saved created_at_days_ago condition without error', () => {

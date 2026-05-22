@@ -39,7 +39,7 @@ describe('segmentConditionSchema — attribute allowlist', () => {
   const baseCondition = { operator: 'eq' as const, value: 'test' }
 
   it.each([
-    'email_domain',
+    'email',
     'email_verified',
     'created_at_days_ago',
     'post_count',

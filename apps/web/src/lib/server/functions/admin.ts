@@ -1101,7 +1101,7 @@ const segmentByIdSchema = z.object({
 // Shared condition schema used by both create and update
 export const segmentConditionSchema = z.object({
   attribute: z.enum([
-    'email_domain',
+    'email',
     'email_verified',
     'created_at_days_ago',
     'post_count',

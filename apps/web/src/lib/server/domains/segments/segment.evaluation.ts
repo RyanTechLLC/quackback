@@ -48,7 +48,7 @@ function buildConditionSql(condition: SegmentCondition): ReturnType<typeof sql> 
   if (operator === 'is_set' || operator === 'is_not_set') {
     const isSet = operator === 'is_set'
     switch (attribute) {
-      case 'email_domain':
+      case 'email':
         return isSet ? sql`u.email IS NOT NULL` : sql`u.email IS NULL`
       case 'email_verified':
         return isSet ? sql`u.email_verified = true` : sql`u.email_verified = false`
@@ -93,9 +93,9 @@ function buildConditionSql(condition: SegmentCondition): ReturnType<typeof sql> 
     )
 
     switch (attribute) {
-      case 'email_domain': {
-        const domains = values.map((v) => sql`${String(v).replace(/^@/, '').toLowerCase()}`)
-        return sql`LOWER(SPLIT_PART(u.email, '@', 2)) IN (${sql.join(domains, sql`, `)})`
+      case 'email': {
+        const emails = values.map((v) => sql`${String(v).toLowerCase()}`)
+        return sql`LOWER(u.email) IN (${sql.join(emails, sql`, `)})`
       }
       case 'plan':
         return sql`(u.metadata::jsonb->>'plan') IN (${placeholders})`
@@ -119,12 +119,13 @@ function buildConditionSql(condition: SegmentCondition): ReturnType<typeof sql> 
     case 'email_verified':
       return sql`u.email_verified = ${Boolean(value)}`
 
-    case 'email_domain': {
-      const domain = String(value).replace(/^@/, '')
-      if (operator === 'eq') return sql`u.email ILIKE ${'%@' + domain}`
-      if (operator === 'neq') return sql`u.email NOT ILIKE ${'%@' + domain}`
-      if (operator === 'ends_with') return sql`u.email ILIKE ${'%' + domain}`
-      return null
+    case 'email': {
+      const field = sql`u.email`
+      const strResult = stringOperatorSql(field, operator, value)
+      if (strResult) return strResult
+      const sqlOp = OPERATOR_SQL[operator]
+      if (!sqlOp) return null
+      return sql`${field} ${sql.raw(sqlOp)} ${String(value)}`
     }
 
     case 'created_at_days_ago': {

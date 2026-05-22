@@ -6,10 +6,12 @@ import {
   getFieldOperators,
   isBuiltinField,
   type BuiltinField,
+  type FieldOperator,
 } from '../segment-builtin-fields'
 import type { SegmentRuleAttribute } from '@/lib/server/db'
 
 const ALLOWED_TYPES: ReadonlyArray<BuiltinField['type']> = ['string', 'number', 'boolean', 'date']
+const ALLOWED_GROUPS: ReadonlyArray<BuiltinField['group']> = ['attribute', 'activity']
 
 describe('BUILTIN_FIELDS registry well-formedness', () => {
   it('is a non-empty array', () => {
@@ -36,6 +38,14 @@ describe('BUILTIN_FIELDS registry well-formedness', () => {
     }
   })
 
+  it('every entry has a valid group', () => {
+    for (const field of BUILTIN_FIELDS) {
+      expect(ALLOWED_GROUPS, `field "${field.key}" has invalid group "${field.group}"`).toContain(
+        field.group
+      )
+    }
+  })
+
   it('keys are unique', () => {
     const keys = BUILTIN_FIELDS.map((f) => f.key)
     const uniqueKeys = new Set(keys)
@@ -45,7 +55,7 @@ describe('BUILTIN_FIELDS registry well-formedness', () => {
   it('includes all expected built-in keys', () => {
     const keys: Set<string> = new Set(BUILTIN_FIELDS.map((f) => f.key))
     const expected = [
-      'email_domain',
+      'email',
       'email_verified',
       'created_at_days_ago',
       'post_count',
@@ -58,6 +68,11 @@ describe('BUILTIN_FIELDS registry well-formedness', () => {
     for (const key of expected) {
       expect(keys.has(key), `expected key "${key}" to be in BUILTIN_FIELDS`).toBe(true)
     }
+  })
+
+  it('does NOT include email_domain (replaced by email)', () => {
+    const keys: Set<string> = new Set(BUILTIN_FIELDS.map((f) => f.key))
+    expect(keys.has('email_domain')).toBe(false)
   })
 
   it('does NOT include plan or metadata_key (those are the custom-attribute mechanism)', () => {
@@ -85,10 +100,31 @@ describe('BUILTIN_FIELDS registry well-formedness', () => {
   })
 
   it('string fields have type string', () => {
-    for (const key of ['email_domain', 'name', 'display_name', 'principal_type']) {
+    for (const key of ['email', 'name', 'display_name', 'principal_type']) {
       const field = BUILTIN_FIELDS.find((f) => f.key === key)
       expect(field?.type, `"${key}" should be string`).toBe('string')
     }
+  })
+
+  it('attribute-group fields are name, display_name, email, email_verified, principal_type', () => {
+    const attributeKeys = BUILTIN_FIELDS.filter((f) => f.group === 'attribute').map((f) => f.key)
+    expect(attributeKeys).toEqual(
+      expect.arrayContaining(['name', 'display_name', 'email', 'email_verified', 'principal_type'])
+    )
+    expect(attributeKeys).not.toContain('post_count')
+    expect(attributeKeys).not.toContain('vote_count')
+    expect(attributeKeys).not.toContain('comment_count')
+    expect(attributeKeys).not.toContain('created_at_days_ago')
+  })
+
+  it('activity-group fields are created_at_days_ago, post_count, vote_count, comment_count', () => {
+    const activityKeys = BUILTIN_FIELDS.filter((f) => f.group === 'activity').map((f) => f.key)
+    expect(activityKeys).toEqual(
+      expect.arrayContaining(['created_at_days_ago', 'post_count', 'vote_count', 'comment_count'])
+    )
+    expect(activityKeys).not.toContain('name')
+    expect(activityKeys).not.toContain('email')
+    expect(activityKeys).not.toContain('email_verified')
   })
 })
 
@@ -162,15 +198,21 @@ describe('DEFAULT_OPERATORS', () => {
 })
 
 describe('getFieldOperators', () => {
-  it('returns field.operators when present (email_domain override)', () => {
-    const field = BUILTIN_FIELDS.find((f) => f.key === 'email_domain')!
-    const ops = getFieldOperators(field).map((o) => o.value)
-    // email_domain evaluator does NOT support contains or starts_with
-    expect(ops).not.toContain('contains')
-    expect(ops).not.toContain('starts_with')
-    expect(ops).toContain('ends_with')
+  it('email uses the string type default (full operator set including contains, starts_with)', () => {
+    const field = BUILTIN_FIELDS.find((f) => f.key === 'email') as BuiltinField | undefined
+    expect(field).toBeDefined()
+    // email has no operators override — falls back to string default
+    expect((field as BuiltinField & { operators?: unknown }).operators).toBeUndefined()
+    const ops = getFieldOperators(field!).map(
+      (o: { value: FieldOperator; label: string }) => o.value
+    )
     expect(ops).toContain('eq')
+    expect(ops).toContain('neq')
+    expect(ops).toContain('contains')
+    expect(ops).toContain('starts_with')
+    expect(ops).toContain('ends_with')
     expect(ops).toContain('is_set')
+    expect(ops).toContain('is_not_set')
   })
 
   it('returns field.operators for principal_type (only eq/neq)', () => {

@@ -33,7 +33,7 @@ export type SegmentRuleOperator =
   | 'is_not_set'
 
 export type SegmentRuleAttribute =
-  | 'email_domain'
+  | 'email'
   | 'email_verified'
   | 'created_at_days_ago'
   | 'post_count'
