@@ -11,6 +11,7 @@ import { generateThemeCSS, getGoogleFontsUrl } from '@/lib/shared/theme'
 import { resolveLocale } from '@/lib/shared/i18n'
 import { PortalIntlProvider } from '@/components/portal-intl-provider'
 import { evaluateMyPortalAccessFn } from '@/lib/server/functions/portal-access'
+import { redactSettingsForClient } from '@/lib/server/domains/settings/redact'
 
 /** Resolve locale from Accept-Language header on the server. */
 const getPortalLocale = createServerFn({ method: 'GET' }).handler(async () => {
@@ -108,7 +109,7 @@ export const Route = createFileRoute('/_portal')({
     const locale = await getPortalLocale()
 
     return {
-      org,
+      org: redactSettingsForClient(org),
       baseUrl: baseUrl ?? '',
       userRole,
       session,
