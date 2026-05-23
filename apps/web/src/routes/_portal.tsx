@@ -64,6 +64,11 @@ export const Route = createFileRoute('/_portal')({
         logoUrl: brandingData?.logoUrl ?? null,
         themeStyles: hasThemeConfig ? generateThemeCSS(brandingConfig) : '',
         customCss: settings?.customCss ?? '',
+        // Only meaningful for the 'unauthorized' branch — null when the
+        // visitor is anonymous. The overlay uses this to say "you're
+        // signed in as alice@gmail.com, but…" so the admin can sign out
+        // and try a different account.
+        userEmail: accessResult.reason === 'unauthorized' ? (session?.user?.email ?? null) : null,
         authConfig: {
           found: !!settings?.publicPortalConfig,
           oauth: settings?.publicPortalConfig?.oauth ?? DEFAULT_PORTAL_CONFIG.oauth,
@@ -186,6 +191,7 @@ function PortalErrorBoundary({ error }: { error: unknown; reset?: () => void }) 
         authConfig={gateErr.authConfig}
         themeStyles={gateErr.themeStyles}
         customCss={gateErr.customCss}
+        userEmail={gateErr.userEmail ?? null}
       />
     )
   }

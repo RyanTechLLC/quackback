@@ -13,6 +13,14 @@ export interface PortalAccessGateError {
   logoUrl: string | null
   themeStyles: string
   customCss: string
+  /**
+   * The signed-in visitor's email when reason === 'unauthorized'. Lets the
+   * overlay tell the visitor exactly which account is being blocked so they
+   * can sign out and try a different one (typical case: signed in with a
+   * personal Gmail when the portal allows @acme.com only). Null/undefined
+   * when reason === 'unauthenticated' — no session means no email to show.
+   */
+  userEmail?: string | null
   authConfig: {
     found: boolean
     oauth: Record<string, boolean | undefined>
@@ -24,6 +32,7 @@ export interface PortalAccessGateError {
 export function isValidGateError(obj: unknown): obj is PortalAccessGateError {
   if (!obj || typeof obj !== 'object') return false
   const o = obj as Record<string, unknown>
+  const userEmail = o['userEmail']
   return (
     o['type'] === 'portal-access-gate' &&
     (o['reason'] === 'unauthenticated' || o['reason'] === 'unauthorized') &&
@@ -31,6 +40,8 @@ export function isValidGateError(obj: unknown): obj is PortalAccessGateError {
     (o['logoUrl'] === null || typeof o['logoUrl'] === 'string') &&
     typeof o['themeStyles'] === 'string' &&
     typeof o['customCss'] === 'string' &&
+    // userEmail is optional but, when present, must be string or null
+    (userEmail === undefined || userEmail === null || typeof userEmail === 'string') &&
     o['authConfig'] !== null &&
     typeof o['authConfig'] === 'object' &&
     typeof (o['authConfig'] as Record<string, unknown>)['found'] === 'boolean' &&

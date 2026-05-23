@@ -11,13 +11,17 @@
  * After a successful sign-in the router is invalidated so the _portal loader
  * re-runs; if the visitor is now authorized, the real portal replaces this.
  */
+import { useState } from 'react'
 import { useRouter } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
+import { ArrowPathIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AuthPopoverProvider } from '@/components/auth/auth-popover-context'
 import { AuthDialog } from '@/components/auth/auth-dialog'
 import { useAuthPopover } from '@/components/auth/auth-popover-context'
 import { useAuthBroadcast } from '@/lib/client/hooks/use-auth-broadcast'
+import { signOut } from '@/lib/client/auth-client'
 import type { PortalAccessGateError } from '@/lib/shared/types/portal-gate-error'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -93,11 +97,15 @@ interface GateCardProps {
   workspaceName: string
   logoUrl: string | null
   authConfig: PortalAccessGateError['authConfig']
+  /** Signed-in visitor's email when reason === 'unauthorized'. */
+  userEmail?: string | null
 }
 
-function GateCard({ reason, workspaceName, logoUrl, authConfig }: GateCardProps) {
+function GateCard({ reason, workspaceName, logoUrl, authConfig, userEmail }: GateCardProps) {
   const router = useRouter()
+  const queryClient = useQueryClient()
   const { openAuthPopover } = useAuthPopover()
+  const [signingOut, setSigningOut] = useState(false)
 
   // After a successful sign-in, re-evaluate access by re-running the loader.
   useAuthBroadcast({
@@ -115,6 +123,22 @@ function GateCard({ reason, workspaceName, logoUrl, authConfig }: GateCardProps)
         router.invalidate()
       },
     })
+  }
+
+  // Sign out + invalidate so the gate re-evaluates as unauthenticated and
+  // the visitor can sign back in with a different account. Mirrors the
+  // portal-header sign-out path so cookie + cache + router stay in sync.
+  const handleSignOut = async () => {
+    if (signingOut) return
+    setSigningOut(true)
+    try {
+      await signOut()
+      queryClient.invalidateQueries({ queryKey: ['portal', 'post'] })
+      queryClient.invalidateQueries({ queryKey: ['votedPosts'] })
+      router.invalidate()
+    } finally {
+      setSigningOut(false)
+    }
   }
 
   return (
@@ -149,9 +173,28 @@ function GateCard({ reason, workspaceName, logoUrl, authConfig }: GateCardProps)
             <div>
               <h1 className="text-xl font-semibold tracking-tight">You don&apos;t have access</h1>
               <p className="mt-2 text-sm text-muted-foreground">
-                This portal is private. Reach out to the {workspaceName} team to request access.
+                This portal is private and {userEmail ? '' : 'your account'} isn&apos;t on the
+                access list.
+                {userEmail && (
+                  <>
+                    {' '}
+                    You&apos;re signed in as{' '}
+                    <span className="font-medium text-foreground">{userEmail}</span>.
+                  </>
+                )}{' '}
+                Reach out to the {workspaceName} team to request access, or sign out and try a
+                different account.
               </p>
             </div>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => void handleSignOut()}
+              disabled={signingOut}
+            >
+              {signingOut ? <ArrowPathIcon className="mr-2 h-3 w-3 animate-spin" /> : null}
+              Sign out
+            </Button>
           </>
         )}
       </div>
@@ -167,7 +210,7 @@ function GateCard({ reason, workspaceName, logoUrl, authConfig }: GateCardProps)
 export interface PortalAccessGateProps
   extends
     Omit<GateCardProps, 'authConfig'>,
-    Pick<PortalAccessGateError, 'authConfig' | 'themeStyles' | 'customCss'> {}
+    Pick<PortalAccessGateError, 'authConfig' | 'themeStyles' | 'customCss' | 'userEmail'> {}
 
 export function PortalAccessGate({
   reason,
@@ -176,6 +219,7 @@ export function PortalAccessGate({
   authConfig,
   themeStyles,
   customCss,
+  userEmail,
 }: PortalAccessGateProps) {
   return (
     <div className="relative min-h-screen">
@@ -199,6 +243,7 @@ export function PortalAccessGate({
             workspaceName={workspaceName}
             logoUrl={logoUrl}
             authConfig={authConfig}
+            userEmail={userEmail}
           />
         </AuthPopoverProvider>
       </div>
