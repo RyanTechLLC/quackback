@@ -477,6 +477,13 @@
       "when": 1778457600014,
       "tag": "0067_drop_boards_moderation",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1778457600015,
+      "tag": "0068_invitation_kind",
+      "breakpoints": true
     }
   ]
 }

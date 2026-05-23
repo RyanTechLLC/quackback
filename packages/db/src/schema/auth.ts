@@ -394,6 +394,16 @@ export const invitation = pgTable(
     name: text('name'),
     role: text('role'),
     status: text('status').default('pending').notNull(),
+    /**
+     * Discriminates team invitations from portal-access invitations.
+     * 'team'   — sent via the team/members settings page (original behaviour).
+     * 'portal' — sent via the portal-access settings page to grant a specific
+     *            person access to a private portal.
+     *
+     * Every query against this table MUST filter on `kind` so that a portal
+     * invite for an email never leaks into the team-invite UI and vice versa.
+     */
+    kind: text('kind').$type<'team' | 'portal'>().notNull().default('team'),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     lastSentAt: timestamp('last_sent_at', { withTimezone: true }),
@@ -403,8 +413,10 @@ export const invitation = pgTable(
   },
   (table) => [
     index('invitation_email_idx').on(table.email),
-    // Index for duplicate invitation checks
+    // Index for duplicate invitation checks (legacy — kept for backward compatibility)
     index('invitation_email_status_idx').on(table.email, table.status),
+    // Composite index for kind-discriminated lookup paths
+    index('invitation_email_kind_status_idx').on(table.email, table.kind, table.status),
   ]
 )
 

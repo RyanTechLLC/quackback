@@ -238,3 +238,116 @@ describe('evaluatePortalAccess — private portal, allowed email domains', () =>
     }
   })
 })
+
+describe('evaluatePortalAccess — private portal, accepted portal invite', () => {
+  it('grants access when hasAcceptedPortalInvite=true, verified email, authenticated', () => {
+    const result = evaluatePortalAccess({
+      visibility: 'private',
+      role: 'user',
+      isAuthenticated: true,
+      userEmail: 'invitee@example.com',
+      emailVerified: true,
+      allowedDomains: [],
+      hasAcceptedPortalInvite: true,
+    })
+    expect(result.granted).toBe(true)
+    if (result.granted) {
+      expect(result.reason).toBe('invite')
+    }
+  })
+
+  it('SECURITY: does NOT grant when invite is accepted but email is NOT verified', () => {
+    const result = evaluatePortalAccess({
+      visibility: 'private',
+      role: 'user',
+      isAuthenticated: true,
+      userEmail: 'invitee@example.com',
+      emailVerified: false,
+      allowedDomains: [],
+      hasAcceptedPortalInvite: true,
+    })
+    expect(result.granted).toBe(false)
+    if (!result.granted) {
+      expect(result.reason).toBe('unauthorized')
+    }
+  })
+
+  it('does NOT grant when hasAcceptedPortalInvite=false', () => {
+    const result = evaluatePortalAccess({
+      visibility: 'private',
+      role: 'user',
+      isAuthenticated: true,
+      userEmail: 'invitee@example.com',
+      emailVerified: true,
+      allowedDomains: [],
+      hasAcceptedPortalInvite: false,
+    })
+    expect(result.granted).toBe(false)
+    if (!result.granted) {
+      expect(result.reason).toBe('unauthorized')
+    }
+  })
+
+  it('does NOT grant when unauthenticated even with hasAcceptedPortalInvite=true', () => {
+    const result = evaluatePortalAccess({
+      visibility: 'private',
+      role: null,
+      isAuthenticated: false,
+      userEmail: null,
+      emailVerified: false,
+      allowedDomains: [],
+      hasAcceptedPortalInvite: true,
+    })
+    expect(result.granted).toBe(false)
+    if (!result.granted) {
+      expect(result.reason).toBe('unauthenticated')
+    }
+  })
+
+  it('defaults hasAcceptedPortalInvite=false when omitted — existing callers unaffected', () => {
+    // The field is optional; omitting it is equivalent to false.
+    const result = evaluatePortalAccess({
+      visibility: 'private',
+      role: 'user',
+      isAuthenticated: true,
+      userEmail: 'user@example.com',
+      emailVerified: true,
+      allowedDomains: [],
+    })
+    expect(result.granted).toBe(false)
+  })
+
+  it('team grant takes precedence over invite (team checked first)', () => {
+    const result = evaluatePortalAccess({
+      visibility: 'private',
+      role: 'admin',
+      isAuthenticated: true,
+      userEmail: 'admin@example.com',
+      emailVerified: true,
+      allowedDomains: [],
+      hasAcceptedPortalInvite: true,
+    })
+    expect(result.granted).toBe(true)
+    if (result.granted) {
+      // Team branch fires before invite branch.
+      expect(result.reason).toBe('team')
+    }
+  })
+
+  it('domain grant takes precedence over invite (domain checked before invite)', () => {
+    const result = evaluatePortalAccess({
+      visibility: 'private',
+      role: 'user',
+      isAuthenticated: true,
+      userEmail: 'user@acme.com',
+      emailVerified: true,
+      allowedDomains: ['acme.com'],
+      hasAcceptedPortalInvite: true,
+    })
+    expect(result.granted).toBe(true)
+    if (result.granted) {
+      // Domain branch fires before invite branch.
+      expect(result.reason).toBe('domain')
+    }
+  })
+})

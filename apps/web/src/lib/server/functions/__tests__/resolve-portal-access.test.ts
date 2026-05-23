@@ -41,15 +41,20 @@ vi.mock('@/lib/server/auth/index', () => ({
 // --- Mock: db (dynamic import target) ---
 
 const mockPrincipalFindFirst = vi.fn()
+const mockInvitationFindFirst = vi.fn()
 
 vi.mock('@/lib/server/db', () => ({
   db: {
     query: {
       principal: { findFirst: (...args: unknown[]) => mockPrincipalFindFirst(...args) },
+      invitation: { findFirst: (...args: unknown[]) => mockInvitationFindFirst(...args) },
     },
   },
   principal: { userId: 'userId' },
+  invitation: { email: 'email', kind: 'kind', status: 'status' },
   eq: vi.fn(),
+  and: vi.fn((...args: unknown[]) => args),
+  sql: vi.fn((parts: TemplateStringsArray) => parts.raw[0]),
 }))
 
 // --- Mock: settings service (static import target) ---
@@ -72,6 +77,8 @@ import { resolvePortalAccessForRequest } from '../portal-access'
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Default: no accepted portal invite.
+  mockInvitationFindFirst.mockResolvedValue(null)
 })
 
 describe('resolvePortalAccessForRequest — no-settings-safe', () => {
@@ -224,5 +231,85 @@ describe('resolvePortalAccessForRequest — private portal', () => {
     })
 
     await expect(resolvePortalAccessForRequest()).resolves.toMatchObject({ granted: true })
+  })
+})
+
+describe('resolvePortalAccessForRequest — portal invite grant', () => {
+  it('grants reason=invite for a verified caller with an accepted portal invite', async () => {
+    mockGetSession.mockResolvedValue({
+      user: { id: 'user_inv', email: 'invitee@example.com', emailVerified: true },
+    })
+    mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })
+    mockInvitationFindFirst.mockResolvedValue({ id: 'invite_1' })
+    mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [] },
+    })
+
+    const result = await resolvePortalAccessForRequest()
+
+    expect(result).toEqual({ granted: true, reason: 'invite' })
+  })
+
+  it('denies when no accepted invite exists (invite lookup returns null)', async () => {
+    mockGetSession.mockResolvedValue({
+      user: { id: 'user_inv', email: 'uninvited@example.com', emailVerified: true },
+    })
+    mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })
+    mockInvitationFindFirst.mockResolvedValue(null)
+    mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [] },
+    })
+
+    const result = await resolvePortalAccessForRequest()
+
+    expect(result.granted).toBe(false)
+    if (!result.granted) {
+      expect(result.reason).toBe('unauthorized')
+    }
+  })
+
+  it('fails CLOSED on invite lookup DB error (deny, not throw)', async () => {
+    // A DB error during the invite lookup must never grant access.
+    mockGetSession.mockResolvedValue({
+      user: { id: 'user_inv', email: 'invitee@example.com', emailVerified: true },
+    })
+    mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })
+    mockInvitationFindFirst.mockRejectedValue(new Error('DB_TIMEOUT'))
+    mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [] },
+    })
+
+    const result = await resolvePortalAccessForRequest()
+
+    expect(result.granted).toBe(false)
+    if (!result.granted) {
+      expect(result.reason).toBe('unauthorized')
+    }
+  })
+
+  it('skips invite lookup when emailVerified=false (unverified email cannot claim invite)', async () => {
+    mockGetSession.mockResolvedValue({
+      user: { id: 'user_inv', email: 'invitee@example.com', emailVerified: false },
+    })
+    mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })
+    mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [] },
+    })
+
+    await resolvePortalAccessForRequest()
+
+    // invite lookup should not have been called
+    expect(mockInvitationFindFirst).not.toHaveBeenCalled()
+  })
+
+  it('skips invite lookup when caller is unauthenticated', async () => {
+    mockGetSession.mockResolvedValue(null)
+    mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [] },
+    })
+
+    await resolvePortalAccessForRequest()
+
+    expect(mockInvitationFindFirst).not.toHaveBeenCalled()
   })
 })

@@ -34,7 +34,7 @@ import type { UserId } from '@quackback/ids'
 export type PortalAccessDecision =
   | {
       granted: true
-      reason: 'public' | 'team' | 'domain'
+      reason: 'public' | 'team' | 'domain' | 'invite'
     }
   | {
       granted: false
@@ -109,6 +109,30 @@ export async function resolvePortalAccessForRequest(): Promise<PortalAccessDecis
 
   const isAuthenticated = !!session?.user && !isAnonymousPrincipal
 
+  // Check for an accepted portal invite — only when the caller is a
+  // verified authenticated user (both conditions required before hitting DB).
+  // Fail CLOSED on DB error: if the lookup fails, assume no invite so a DB
+  // outage never grants access to a private portal.
+  let hasAcceptedPortalInvite = false
+  if (isAuthenticated && emailVerified && userEmail) {
+    const { invitation, and: dbAnd, sql: dbSql } = await import('@/lib/server/db')
+    try {
+      const inviteRow = await db.query.invitation.findFirst({
+        where: dbAnd(
+          eq(invitation.email, userEmail),
+          eq(invitation.kind, 'portal'),
+          eq(invitation.status, 'accepted'),
+          dbSql`("invitation"."expires_at" IS NULL OR "invitation"."expires_at" > now())`
+        ),
+        columns: { id: true },
+      })
+      hasAcceptedPortalInvite = !!inviteRow
+    } catch {
+      // Invite lookup failed — assume no invite (fail closed).
+      hasAcceptedPortalInvite = false
+    }
+  }
+
   // Read the full portal config server-side — never leaves this function.
   // A missing/unreadable config must NOT throw: fail open to a public portal
   // so an un-onboarded install keeps working. `getPortalConfig` throws
@@ -123,6 +147,7 @@ export async function resolvePortalAccessForRequest(): Promise<PortalAccessDecis
       userEmail,
       emailVerified,
       allowedDomains: portalConfig.access?.allowedDomains ?? [],
+      hasAcceptedPortalInvite,
     })
   } catch {
     // No settings row / config unreadable — treat the portal as public.

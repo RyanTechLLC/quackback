@@ -932,7 +932,11 @@ export const sendInvitationFn = createServerFn({ method: 'POST' })
       // Parallelize invitation and user validation queries
       const [existingInvitation, existingUser] = await Promise.all([
         db.query.invitation.findFirst({
-          where: and(eq(invitation.email, email), eq(invitation.status, 'pending')),
+          where: and(
+            eq(invitation.email, email),
+            eq(invitation.status, 'pending'),
+            eq(invitation.kind, 'team')
+          ),
         }),
         db.query.user.findFirst({
           where: eq(user.email, email),
@@ -1014,7 +1018,11 @@ export const cancelInvitationFn = createServerFn({ method: 'POST' })
       const invitationId = data.invitationId as InviteId
 
       const invitationRecord = await db.query.invitation.findFirst({
-        where: and(eq(invitation.id, invitationId), eq(invitation.status, 'pending')),
+        where: and(
+          eq(invitation.id, invitationId),
+          eq(invitation.status, 'pending'),
+          eq(invitation.kind, 'team')
+        ),
       })
 
       if (!invitationRecord) {
@@ -1044,7 +1052,11 @@ export const resendInvitationFn = createServerFn({ method: 'POST' })
       const invitationId = data.invitationId as InviteId
 
       const invitationRecord = await db.query.invitation.findFirst({
-        where: and(eq(invitation.id, invitationId), eq(invitation.status, 'pending')),
+        where: and(
+          eq(invitation.id, invitationId),
+          eq(invitation.status, 'pending'),
+          eq(invitation.kind, 'team')
+        ),
       })
 
       if (!invitationRecord) {

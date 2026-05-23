@@ -6,7 +6,7 @@
  *
  * Phase 1: team-only gate (admin | member always pass).
  * Phase 2: allowed email-domain grant (verified email required).
- * Extension points are marked below for later phases.
+ * Phase 3: accepted portal email-invite grant (verified email required).
  */
 
 // =============================================================================
@@ -45,11 +45,20 @@ export interface PortalAccessContext {
    * private portal. Resolved from portalConfig.access?.allowedDomains.
    */
   allowedDomains: string[]
+  /**
+   * True when the visitor has a portal invitation row with status='accepted'
+   * whose email matches their verified session email.
+   *
+   * Populated by the resolver via a DB lookup. Defaults to `false` so callers
+   * that don't consult the invite table (e.g. the widget gate, legacy code)
+   * remain valid without changes.
+   */
+  hasAcceptedPortalInvite?: boolean
 }
 
 /** Discriminated union — narrows cleanly in if/switch. */
 export type PortalAccessResult =
-  | { granted: true; reason: 'public' | 'team' | 'domain' }
+  | { granted: true; reason: 'public' | 'team' | 'domain' | 'invite' }
   | { granted: false; reason: 'unauthenticated' | 'unauthorized' }
 
 // =============================================================================
@@ -78,9 +87,14 @@ function emailDomain(email: string | null): string | null {
  * 1. Public portal → always granted.
  * 2. Team member (admin | member) → granted.
  * 3. Verified email on allowed-domain list → granted.
- * --- EXTENSION POINT: Phase N grant branches go here (invite, widget) ---
- * 4. No real session → unauthenticated (redirect to login).
- * 5. Authenticated but not team/domain → unauthorized (show access-denied screen).
+ * 4. Accepted portal invite (email match, verified) → granted.
+ * 5. No real session → unauthenticated (redirect to login).
+ * 6. Authenticated but no matching grant → unauthorized (show access-denied screen).
+ *
+ * Ordering: team > domain > invite. Domain and invite are peer paths that both
+ * require a verified email; invite is checked after domain so that a workspace
+ * that widens access via domain allowlists doesn't accidentally mask an expired
+ * domain entry with a narrower per-email invite.
  */
 export function evaluatePortalAccess(ctx: PortalAccessContext): PortalAccessResult {
   // 1. Public portal — open to everyone.
@@ -103,15 +117,18 @@ export function evaluatePortalAccess(ctx: PortalAccessContext): PortalAccessResu
     }
   }
 
-  // --- EXTENSION POINT ---
-  // Phase N: invite-token / widget-grant checks go here similarly.
-  // -------------------------
+  // 4. Accepted portal invite.
+  //    emailVerified MUST be true — same reasoning as the domain branch above.
+  if (ctx.isAuthenticated && ctx.emailVerified && (ctx.hasAcceptedPortalInvite ?? false)) {
+    return { granted: true, reason: 'invite' }
+  }
 
-  // 4. No real authentication → redirect to login.
+  // 5. No real authentication → redirect to login.
   if (!ctx.isAuthenticated) {
     return { granted: false, reason: 'unauthenticated' }
   }
 
-  // 5. Authenticated but not a team member or allowed domain → show access-denied UI.
+  // 6. Authenticated but not a team member, allowed domain, or accepted invite
+  //    → show access-denied UI.
   return { granted: false, reason: 'unauthorized' }
 }

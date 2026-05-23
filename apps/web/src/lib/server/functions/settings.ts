@@ -172,7 +172,7 @@ export const fetchTeamMembersAndInvitations = createServerFn({ method: 'GET' }).
       }))
 
       const pendingInvitations = await db.query.invitation.findMany({
-        where: eq(invitation.status, 'pending'),
+        where: and(eq(invitation.status, 'pending'), eq(invitation.kind, 'team')),
         orderBy: (inv, { desc }) => [desc(inv.createdAt)],
       })
 

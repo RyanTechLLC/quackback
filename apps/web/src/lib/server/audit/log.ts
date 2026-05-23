@@ -62,6 +62,10 @@ export type AuditEventType =
   | 'segment.member.added'
   | 'segment.member.removed'
   | 'segment.sso_mapping.changed'
+  // v1 portal invites
+  | 'portal.invite.sent'
+  | 'portal.invite.accepted'
+  | 'portal.invite.revoked'
 
 export type AuditEventOutcome = 'success' | 'failure'
 
