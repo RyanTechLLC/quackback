@@ -21,7 +21,9 @@ import { Badge } from '@/components/ui/badge'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -33,8 +35,20 @@ import type { AuditEventRow } from '@/lib/server/functions/audit-log'
  * AuditEventType union — sourced from the server to keep the two in
  * lockstep would be neat, but a curated short list is friendlier for
  * the dropdown.
+ *
+ * Shape: `{ label, value, group?, excludeByDefault? }`. Items without a
+ * `group` appear at the top (ungrouped). `excludeByDefault` marks high-
+ * volume events that should not be shown on initial load; honored by any
+ * future multi-select variant of this filter.
  */
-const FILTER_EVENT_TYPES = [
+interface FilterEventOption {
+  label: string
+  value: string
+  group?: string
+  excludeByDefault?: boolean
+}
+
+const FILTER_EVENT_TYPES: FilterEventOption[] = [
   { label: 'All events', value: 'all' },
   { label: 'SSO enforcement enabled (domain)', value: 'sso.enforcement.domain.enabled' },
   { label: 'SSO enforcement disabled (domain)', value: 'sso.enforcement.domain.disabled' },
@@ -44,7 +58,16 @@ const FILTER_EVENT_TYPES = [
   { label: 'Email sign-in enabled', value: 'auth.magic_link.enabled' },
   { label: 'Email sign-in disabled', value: 'auth.magic_link.disabled' },
   { label: 'Two-factor reset by admin', value: 'two_factor.reset_by_admin' },
-] as const
+  // Portal events
+  { group: 'Portal', label: 'Allowed domains changed', value: 'portal.allowed_domains.changed' },
+  { group: 'Portal', label: 'Invite accepted', value: 'portal.invite.accepted' },
+  { group: 'Portal', label: 'Invite link minted', value: 'portal.invite.link_minted' },
+  { group: 'Portal', label: 'Invite resent', value: 'portal.invite.resent' },
+  { group: 'Portal', label: 'Invite revoked', value: 'portal.invite.revoked' },
+  { group: 'Portal', label: 'Invite sent', value: 'portal.invite.sent' },
+  { group: 'Portal', label: 'Visibility changed', value: 'portal.visibility.changed' },
+  { group: 'Portal', label: 'Widget sign-in changed', value: 'portal.widget_signin.changed' },
+]
 
 const TIME_RANGES = [
   { label: 'Last 7 days', value: '7d' },
@@ -220,10 +243,26 @@ export function AuditLogPage() {
               <SelectValue placeholder="Event type" />
             </SelectTrigger>
             <SelectContent>
-              {FILTER_EVENT_TYPES.map((opt) => (
+              {/* Ungrouped items first */}
+              {FILTER_EVENT_TYPES.filter((o) => !o.group).map((opt) => (
                 <SelectItem key={opt.value} value={opt.value} className="text-xs">
                   {opt.label}
                 </SelectItem>
+              ))}
+              {/* Grouped items */}
+              {Array.from(
+                new Set(FILTER_EVENT_TYPES.filter((o) => !!o.group).map((o) => o.group!))
+              ).map((group) => (
+                <SelectGroup key={group}>
+                  <SelectLabel className="text-xs font-semibold text-muted-foreground px-2 py-1">
+                    {group}
+                  </SelectLabel>
+                  {FILTER_EVENT_TYPES.filter((o) => o.group === group).map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               ))}
             </SelectContent>
           </Select>
