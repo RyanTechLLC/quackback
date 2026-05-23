@@ -7,6 +7,7 @@
  * Phase 1: team-only gate (admin | member always pass).
  * Phase 2: allowed email-domain grant (verified email required).
  * Phase 3: accepted portal email-invite grant (verified email required).
+ * Phase 4: widget sign-in grant (any portal-signed-in user when admin enables widgetSignIn).
  */
 
 // =============================================================================
@@ -54,11 +55,19 @@ export interface PortalAccessContext {
    * remain valid without changes.
    */
   hasAcceptedPortalInvite?: boolean
+  /**
+   * True when the workspace admin has enabled widget sign-in on this
+   * private portal. When set, any portal-signed-in user (role='user')
+   * gains access — the handshake mechanism is what enables widget-
+   * HMAC-verified users to become signed-in portal users in the first
+   * place. Defaults to `false`.
+   */
+  widgetSignInEnabled?: boolean
 }
 
 /** Discriminated union — narrows cleanly in if/switch. */
 export type PortalAccessResult =
-  | { granted: true; reason: 'public' | 'team' | 'domain' | 'invite' }
+  | { granted: true; reason: 'public' | 'team' | 'domain' | 'invite' | 'widget' }
   | { granted: false; reason: 'unauthenticated' | 'unauthorized' }
 
 // =============================================================================
@@ -88,13 +97,15 @@ function emailDomain(email: string | null): string | null {
  * 2. Team member (admin | member) → granted.
  * 3. Verified email on allowed-domain list → granted.
  * 4. Accepted portal invite (email match, verified) → granted.
- * 5. No real session → unauthenticated (redirect to login).
- * 6. Authenticated but no matching grant → unauthorized (show access-denied screen).
+ * 5. Widget sign-in enabled + authenticated portal user → granted.
+ * 6. No real session → unauthenticated (redirect to login).
+ * 7. Authenticated but no matching grant → unauthorized (show access-denied screen).
  *
- * Ordering: team > domain > invite. Domain and invite are peer paths that both
- * require a verified email; invite is checked after domain so that a workspace
- * that widens access via domain allowlists doesn't accidentally mask an expired
- * domain entry with a narrower per-email invite.
+ * Ordering: team > domain > invite > widget. The widget branch is intentionally
+ * last among grant paths so that a more-specific grant (team, domain, invite)
+ * is preferred when the user qualifies for multiple paths. The widget branch
+ * admits any role='user' principal when widgetSignInEnabled — the handshake
+ * mechanism is what gets a widget-verified user into a portal session.
  */
 export function evaluatePortalAccess(ctx: PortalAccessContext): PortalAccessResult {
   // 1. Public portal — open to everyone.
@@ -123,12 +134,20 @@ export function evaluatePortalAccess(ctx: PortalAccessContext): PortalAccessResu
     return { granted: true, reason: 'invite' }
   }
 
-  // 5. No real authentication → redirect to login.
+  // 5. Widget sign-in grant.
+  //    When the admin enables widgetSignIn, any portal-signed-in user (role='user')
+  //    gets in. The handshake route is what converts a widget-HMAC-verified visitor
+  //    into a signed-in portal user in the first place.
+  //    Anonymous principals do NOT qualify — isAuthenticated must be true.
+  if ((ctx.widgetSignInEnabled ?? false) && ctx.isAuthenticated && ctx.role === 'user') {
+    return { granted: true, reason: 'widget' }
+  }
+
+  // 6. No real authentication → redirect to login.
   if (!ctx.isAuthenticated) {
     return { granted: false, reason: 'unauthenticated' }
   }
 
-  // 6. Authenticated but not a team member, allowed domain, or accepted invite
-  //    → show access-denied UI.
+  // 7. Authenticated but no matching grant → show access-denied UI.
   return { granted: false, reason: 'unauthorized' }
 }

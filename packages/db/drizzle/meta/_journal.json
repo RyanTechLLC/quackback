@@ -484,6 +484,13 @@
       "when": 1778457600015,
       "tag": "0068_invitation_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1778457600016,
+      "tag": "0069_portal_handshake_used",
+      "breakpoints": true
     }
   ]
 }

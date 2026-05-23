@@ -199,6 +199,8 @@ export {
   auditLog,
   // Schema tables - sso recovery codes
   ssoRecoveryCode,
+  // Schema tables - portal handshake
+  portalHandshakeUsed,
   // Schema tables - segments
   segments,
   segmentsRelations,

@@ -34,7 +34,7 @@ import type { UserId } from '@quackback/ids'
 export type PortalAccessDecision =
   | {
       granted: true
-      reason: 'public' | 'team' | 'domain' | 'invite'
+      reason: 'public' | 'team' | 'domain' | 'invite' | 'widget'
     }
   | {
       granted: false
@@ -148,6 +148,7 @@ export async function resolvePortalAccessForRequest(): Promise<PortalAccessDecis
       emailVerified,
       allowedDomains: portalConfig.access?.allowedDomains ?? [],
       hasAcceptedPortalInvite,
+      widgetSignInEnabled: portalConfig.access?.widgetSignIn ?? false,
     })
   } catch {
     // No settings row / config unreadable — treat the portal as public.

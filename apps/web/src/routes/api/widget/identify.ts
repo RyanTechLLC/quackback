@@ -4,15 +4,18 @@ import { generateId } from '@quackback/ids'
 import type { UserId, PrincipalId } from '@quackback/ids'
 import { db, user, session, principal, segments, eq, and, gt, isNull } from '@/lib/server/db'
 import { getWidgetConfig, getWidgetSecret } from '@/lib/server/domains/settings/settings.widget'
+import { getPortalConfig } from '@/lib/server/domains/settings/settings.service'
 import { getAllUserVotedPostIds } from '@/lib/server/domains/posts/post.public'
 import { getPublicUrlOrNull } from '@/lib/server/storage/s3'
 import { resolveAndMergeAnonymousToken } from '@/lib/server/auth/identify-merge'
 import { verifyHS256JWT } from '@/lib/server/widget/identity-token'
+import { mintPortalHandshakeToken } from '@/lib/server/auth/portal-handshake'
 import {
   validateAndCoerceAttributes,
   mergeMetadata,
 } from '@/lib/server/domains/users/user.attributes'
 import { addMember } from '@/lib/server/domains/segments/segment-membership.service'
+import { config } from '@/lib/server/config'
 
 const identifySchema = z
   .object({
@@ -117,13 +120,15 @@ export const Route = createFileRoute('/api/widget/identify')({
         // Determine identity source: verified JWT or unverified body fields
         let claims: Record<string, unknown>
         let claimsAreVerified = false
+        // Hoisted so the handshake-URL branch can reuse the already-loaded secret.
+        let widgetSecret: string | null = null
 
         if (body.ssoToken) {
-          const secret = await getWidgetSecret()
-          if (!secret) {
+          widgetSecret = await getWidgetSecret()
+          if (!widgetSecret) {
             return jsonError('SERVER_ERROR', 'Widget secret not configured', 500)
           }
-          const payload = verifyHS256JWT(body.ssoToken, secret)
+          const payload = verifyHS256JWT(body.ssoToken, widgetSecret)
           if (!payload) {
             return jsonError('TOKEN_INVALID', 'Invalid or expired ssoToken', 403)
           }
@@ -300,6 +305,36 @@ export const Route = createFileRoute('/api/widget/identify')({
           userRecord.image ??
           null
 
+        // Portal handshake URL — only when ALL conditions hold:
+        //   1. Claims are HMAC-verified (ssoToken path, not unverified body)
+        //   2. Portal visibility is 'private'
+        //   3. widgetSignIn is enabled on the portal access config
+        // When these hold, the response includes a short-lived signed URL
+        // the widget can surface as a "Go to portal" button. The URL
+        // carries a one-time handshake token that creates a cookie session
+        // for this user when redeemed at /portal-handshake.
+        let portalHandshakeUrl: string | undefined
+        if (claimsAreVerified) {
+          try {
+            const portalConfig = await getPortalConfig()
+            const access = portalConfig.access
+            if (access?.visibility === 'private' && access.widgetSignIn) {
+              const portalOrigin = config.baseUrl ?? ''
+              if (portalOrigin && widgetSecret) {
+                const mint = mintPortalHandshakeToken({
+                  userId,
+                  workspaceId: 'workspace',
+                  secret: widgetSecret,
+                  portalOrigin,
+                })
+                portalHandshakeUrl = mint.url
+              }
+            }
+          } catch {
+            // Non-fatal — omit the handshake URL rather than failing identify.
+          }
+        }
+
         return Response.json({
           sessionToken,
           user: {
@@ -309,6 +344,7 @@ export const Route = createFileRoute('/api/widget/identify')({
             avatarUrl,
           },
           votedPostIds,
+          ...(portalHandshakeUrl !== undefined ? { portalHandshakeUrl } : {}),
         })
       },
     },

@@ -66,6 +66,9 @@ export type AuditEventType =
   | 'portal.invite.sent'
   | 'portal.invite.accepted'
   | 'portal.invite.revoked'
+  // v1 portal widget sign-in handshake
+  | 'portal.widget_handshake.consumed'
+  | 'portal.widget_handshake.invalid'
 
 export type AuditEventOutcome = 'success' | 'failure'
 
