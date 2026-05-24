@@ -1,4 +1,6 @@
 import { useForm } from 'react-hook-form'
+import { Link } from '@tanstack/react-router'
+import { GlobeAltIcon, LockClosedIcon, TagIcon, UsersIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
 import { FormError } from '@/components/shared/form-error'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -11,18 +13,25 @@ import {
   FormItem,
   FormLabel,
 } from '@/components/ui/form'
+import { SegmentMultiSelect } from '@/components/admin/segments/segment-multi-select'
 import { useUpdateBoardAccess } from '@/lib/client/mutations'
-import { GlobeAltIcon, LockClosedIcon, UsersIcon, TagIcon } from '@heroicons/react/24/solid'
+import { useSegments } from '@/lib/client/hooks/use-segments-queries'
 import type { BoardId } from '@quackback/ids'
 import type { BoardAudience } from '@/lib/shared/db-types'
 
 /**
  * Board visibility form. Backed by `audience` (BoardAudience union).
  *
- * Exposes three of the four visibility kinds as radio buttons (public /
- * authenticated / team). When the board's stored audience is
- * `{ kind: 'segments' }`, the form shows a read-only banner directing the
- * admin to manage the segment list on the Segments admin page.
+ * Exposes all four audience kinds as radio buttons:
+ *   - public          anyone, signed-in or not
+ *   - authenticated   any signed-in portal user
+ *   - team            admins and members only
+ *   - segments        members of one or more named segments
+ *
+ * When `segments` is selected the SegmentMultiSelect appears below the
+ * radio group, preselected from the board's current `segmentIds` if any.
+ * Save is disabled while the selection is empty (server requires at
+ * least one segment) — explicit, no silent fallback to a different kind.
  *
  * Post moderation is workspace-wide (Settings → Permissions), not per-board.
  *
@@ -39,71 +48,53 @@ interface BoardAccessFormProps {
   board: Board
 }
 
-type RadioVisibility = 'public' | 'authenticated' | 'team'
+type RadioVisibility = 'public' | 'authenticated' | 'team' | 'segments'
 
 interface FormValues {
   visibility: RadioVisibility
+  segmentIds: string[]
 }
 
-function radioVisibility(audience: BoardAudience): RadioVisibility | null {
+function audienceToFormValues(audience: BoardAudience): FormValues {
   switch (audience.kind) {
     case 'public':
-      return 'public'
     case 'authenticated':
-      return 'authenticated'
     case 'team':
-      return 'team'
+      return { visibility: audience.kind, segmentIds: [] }
     case 'segments':
-      return null // not representable in this form
+      return { visibility: 'segments', segmentIds: audience.segmentIds }
   }
 }
 
-function formValueToAudience(value: RadioVisibility): BoardAudience {
-  return { kind: value }
+function formValuesToAudience(values: FormValues): BoardAudience {
+  if (values.visibility === 'segments') {
+    return { kind: 'segments', segmentIds: values.segmentIds }
+  }
+  return { kind: values.visibility }
 }
 
 export function BoardAccessForm({ board }: BoardAccessFormProps) {
   const mutation = useUpdateBoardAccess()
-  const initial = radioVisibility(board.audience)
-  const isSegmentAudience = initial === null
+  const segmentsQuery = useSegments()
 
   const form = useForm<FormValues>({
-    defaultValues: {
-      visibility: initial ?? 'public', // placeholder; submit is gated by isSegmentAudience
-    },
+    // Preserves the board's existing segmentIds when it's already on a
+    // segments audience so admins editing aren't surprised by an empty
+    // selection. Switching back from another kind starts empty.
+    defaultValues: audienceToFormValues(board.audience),
   })
 
-  async function onSubmit(data: FormValues) {
-    // Defensive: never overwrite a segments-audience board from this form.
-    // The form value is 'public'/'authenticated'/'team' — submitting would
-    // drop the segmentIds. Disabled in the UI for audience, but belt-and-
-    // braces here too.
-    if (isSegmentAudience) return
+  const visibility = form.watch('visibility')
+  const segmentIds = form.watch('segmentIds')
 
+  const isSegments = visibility === 'segments'
+  const noSegmentsSelected = isSegments && segmentIds.length === 0
+
+  async function onSubmit(values: FormValues) {
     mutation.mutate({
       boardId: board.id,
-      audience: formValueToAudience(data.visibility),
+      audience: formValuesToAudience(values),
     })
-  }
-
-  if (isSegmentAudience) {
-    const segmentIds = board.audience.kind === 'segments' ? board.audience.segmentIds : []
-    return (
-      <div className="rounded-lg border border-border/50 bg-muted/30 p-4">
-        <div className="flex items-start gap-3">
-          <TagIcon className="h-4 w-4 text-muted-foreground mt-1" />
-          <div className="space-y-1">
-            <p className="font-medium text-sm">Restricted to specific segments</p>
-            <p className="text-xs text-muted-foreground">
-              This board is currently visible only to members of {segmentIds.length} segment
-              {segmentIds.length === 1 ? '' : 's'}. Edit the segment list from Settings → Access →
-              Segments, or switch this board to one of the standard visibility tiers via the API /
-              updateBoardAccessFn.
-            </p>
-          </div>
-        </div>
-      </div>
-    )
   }
 
   return (
@@ -111,7 +102,6 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
         {mutation.isError && <FormError message={mutation.error?.message ?? 'An error occurred'} />}
 
-        {/* Board Visibility */}
         <FormField
           control={form.control}
           name="visibility"
@@ -123,73 +113,131 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
               </div>
               <FormControl>
                 <RadioGroup
-                  onValueChange={(value) => field.onChange(value as RadioVisibility)}
+                  onValueChange={(value) => {
+                    const next = value as RadioVisibility
+                    field.onChange(next)
+                    // Leaving segments — clear the selection so a later
+                    // re-entry starts fresh and a stale array can't
+                    // sneak back into the payload from a hidden field.
+                    if (next !== 'segments') {
+                      form.setValue('segmentIds', [])
+                    }
+                  }}
                   value={field.value}
                   className="grid gap-3"
                 >
-                  <Label
-                    htmlFor="visibility-public"
-                    className="flex items-start gap-3 rounded-lg border p-4 cursor-pointer hover:bg-muted/50 [&:has([data-state=checked])]:border-primary [&:has([data-state=checked])]:bg-primary/5"
-                  >
-                    <RadioGroupItem value="public" id="visibility-public" className="mt-0.5" />
-                    <div className="flex-1 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <GlobeAltIcon className="h-4 w-4" />
-                        <span className="font-medium">Public</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Anyone can view this board on your portal, including unsigned visitors.
-                        Signed-in users can vote, comment, and submit feedback.
-                      </p>
-                    </div>
-                  </Label>
-                  <Label
-                    htmlFor="visibility-authenticated"
-                    className="flex items-start gap-3 rounded-lg border p-4 cursor-pointer hover:bg-muted/50 [&:has([data-state=checked])]:border-primary [&:has([data-state=checked])]:bg-primary/5"
-                  >
-                    <RadioGroupItem
-                      value="authenticated"
-                      id="visibility-authenticated"
-                      className="mt-0.5"
-                    />
-                    <div className="flex-1 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <UsersIcon className="h-4 w-4" />
-                        <span className="font-medium">Authenticated</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Any signed-in portal user can view this board. Hidden from anonymous
-                        visitors and search indexes.
-                      </p>
-                    </div>
-                  </Label>
-                  <Label
-                    htmlFor="visibility-team"
-                    className="flex items-start gap-3 rounded-lg border p-4 cursor-pointer hover:bg-muted/50 [&:has([data-state=checked])]:border-primary [&:has([data-state=checked])]:bg-primary/5"
-                  >
-                    <RadioGroupItem value="team" id="visibility-team" className="mt-0.5" />
-                    <div className="flex-1 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <LockClosedIcon className="h-4 w-4" />
-                        <span className="font-medium">Team only</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Only admins and team members can view this board
-                      </p>
-                    </div>
-                  </Label>
+                  <AccessOption
+                    id="visibility-public"
+                    icon={GlobeAltIcon}
+                    label="Public"
+                    description="Anyone can view this board on your portal, including unsigned visitors. Signed-in users can vote, comment, and submit feedback."
+                  />
+                  <AccessOption
+                    id="visibility-authenticated"
+                    icon={UsersIcon}
+                    label="Authenticated"
+                    description="Any signed-in portal user can view this board. Hidden from anonymous visitors and search indexes."
+                  />
+                  <AccessOption
+                    id="visibility-team"
+                    icon={LockClosedIcon}
+                    label="Team only"
+                    description="Only admins and team members can view this board."
+                  />
+                  <AccessOption
+                    id="visibility-segments"
+                    icon={TagIcon}
+                    label="Specific segments"
+                    description="Only members of the segments you pick can view this board."
+                  />
                 </RadioGroup>
               </FormControl>
             </FormItem>
           )}
         />
 
+        {isSegments && (
+          <FormField
+            control={form.control}
+            name="segmentIds"
+            render={({ field }) => (
+              <FormItem className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <FormLabel className="text-sm">Allowed segments</FormLabel>
+                  <Link
+                    to="/admin/settings/people"
+                    className="text-xs font-medium text-primary hover:underline"
+                  >
+                    Manage segments →
+                  </Link>
+                </div>
+                {segmentsQuery.isLoading ? (
+                  <p className="text-xs text-muted-foreground">Loading segments…</p>
+                ) : segmentsQuery.isError ? (
+                  <p className="text-xs text-destructive">
+                    Could not load segments. Reload the page to try again.
+                  </p>
+                ) : (segmentsQuery.data ?? []).length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No segments defined yet — create one on the{' '}
+                    <Link to="/admin/settings/people" className="text-primary hover:underline">
+                      People page
+                    </Link>
+                    , then come back to pick it.
+                  </p>
+                ) : (
+                  <SegmentMultiSelect
+                    segments={segmentsQuery.data ?? []}
+                    value={field.value}
+                    onChange={(next) => field.onChange(next)}
+                    disabled={mutation.isPending}
+                  />
+                )}
+                {noSegmentsSelected && (segmentsQuery.data ?? []).length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Pick at least one segment to save.
+                  </p>
+                )}
+              </FormItem>
+            )}
+          />
+        )}
+
         <div className="flex justify-end">
-          <Button type="submit" disabled={mutation.isPending}>
+          <Button type="submit" disabled={mutation.isPending || noSegmentsSelected}>
             {mutation.isPending ? 'Saving...' : 'Save changes'}
           </Button>
         </div>
       </form>
     </Form>
+  )
+}
+
+/** Single radio card — same visual treatment for all four kinds. */
+function AccessOption({
+  id,
+  icon: Icon,
+  label,
+  description,
+}: {
+  id: string
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  description: string
+}) {
+  return (
+    <Label
+      htmlFor={id}
+      className="flex items-start gap-3 rounded-lg border p-4 cursor-pointer hover:bg-muted/50 [&:has([data-state=checked])]:border-primary [&:has([data-state=checked])]:bg-primary/5"
+    >
+      <RadioGroupItem value={id.replace(/^visibility-/, '')} id={id} className="mt-0.5" />
+      <div className="flex-1 space-y-1">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4" />
+          <span className="font-medium">{label}</span>
+        </div>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+    </Label>
   )
 }

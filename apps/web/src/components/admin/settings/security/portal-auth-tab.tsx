@@ -18,6 +18,7 @@ import { updatePortalAccessFn } from '@/lib/server/functions/portal-access'
 import { listSegmentsFn } from '@/lib/server/functions/admin'
 import { InvitePeopleDialog } from '@/components/admin/users/invite-people-dialog'
 import { usePortalInvites } from '@/components/admin/users/use-portal-invites'
+import { SegmentMultiSelect } from '@/components/admin/segments/segment-multi-select'
 import { cn } from '@/lib/shared/utils'
 import type { PortalConfig } from '@/lib/shared/types/settings'
 
@@ -434,72 +435,6 @@ export function PortalAuthTab({ portalConfig }: PortalAuthTabProps) {
         onConfirm={handleConfirmPrivate}
       />
     </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// SegmentMultiSelect
-// ---------------------------------------------------------------------------
-
-interface SegmentItem {
-  id: string
-  name: string
-  memberCount?: number
-}
-
-interface SegmentMultiSelectProps {
-  segments: SegmentItem[]
-  value: string[]
-  onChange: (next: string[]) => void
-  disabled?: boolean
-}
-
-/**
- * Inline multi-select for segments — rendered as a list of checkboxes
- * with segment names and optional member counts.
- */
-function SegmentMultiSelect({ segments, value, onChange, disabled }: SegmentMultiSelectProps) {
-  const selected = new Set(value)
-
-  function toggle(id: string) {
-    if (disabled) return
-    const next = selected.has(id) ? value.filter((s) => s !== id) : [...value, id]
-    onChange(next)
-  }
-
-  return (
-    <ul className="space-y-1.5" role="list" aria-label="Segment allowlist">
-      {segments.map((seg) => {
-        const checked = selected.has(seg.id)
-        return (
-          <li key={seg.id}>
-            <label
-              className={cn(
-                'flex items-center gap-2.5 rounded-md border px-3 py-2 cursor-pointer transition-colors',
-                checked
-                  ? 'border-primary/30 bg-primary/5'
-                  : 'border-border/50 bg-muted/20 hover:bg-muted/40',
-                disabled && 'cursor-not-allowed opacity-60'
-              )}
-            >
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={() => toggle(seg.id)}
-                disabled={disabled}
-                className="h-3.5 w-3.5 rounded border-border accent-primary"
-              />
-              <span className="flex-1 text-sm">{seg.name}</span>
-              {seg.memberCount !== undefined && (
-                <span className="text-xs text-muted-foreground">
-                  {seg.memberCount} member{seg.memberCount === 1 ? '' : 's'}
-                </span>
-              )}
-            </label>
-          </li>
-        )
-      })}
-    </ul>
   )
 }
 
