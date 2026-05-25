@@ -112,9 +112,37 @@ export function SsoTestSignInProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // Tracks the most recent test's id so the last-chance poll on popup
+  // close can fetch by the right key. Assigned in handleStart; cleared
+  // when the test resolves/closes.
+  const activeTestIdRef = useRef<string | null>(null)
+
   const { trackPopup, clearPopup } = usePopupTracker({
-    onPopupClosed: () => {
+    onPopupClosed: async () => {
       if (!testingRef.current) return
+      // Last-chance poll. The popup callback HTML auto-closes ~1.5s
+      // after rendering a successful handshake; the regular poll fires
+      // every 2s, so a close-before-next-poll is the common race. Also,
+      // `window.opener.postMessage` from the popup silently fails when
+      // the IdP responses set `Cross-Origin-Opener-Policy: same-origin`
+      // (helmet default on many backends — including a sibling
+      // InterpriseOne IdP) because the cross-origin nav severs the
+      // opener relationship. By the time onPopupClosed fires, the
+      // Redis result row written by sso-test-callback IS ready —
+      // one direct fetch resolves the test instead of falsely telling
+      // the user they "closed the popup before sign-in finished".
+      const testId = activeTestIdRef.current
+      if (testId) {
+        try {
+          const diag = await pollResult({ data: { testId } })
+          if (diag && diag.result && testingRef.current) {
+            resolveTest(diag.result, diag.identityMatched)
+            return
+          }
+        } catch {
+          // Fall through to the abandoned-popup error below.
+        }
+      }
       clearPoll()
       dispatch({
         type: 'failed',
@@ -151,6 +179,7 @@ export function SsoTestSignInProvider({ children }: { children: ReactNode }) {
     (result: WireResult, identityMatched: boolean | undefined) => {
       clearPoll()
       clearPopup()
+      activeTestIdRef.current = null
       dispatch({ type: 'resolved', result, identityMatched })
       if (result.ok) void runAutoApply()
     },
@@ -182,6 +211,7 @@ export function SsoTestSignInProvider({ children }: { children: ReactNode }) {
   const handleClose = useCallback(() => {
     clearPoll()
     clearPopup()
+    activeTestIdRef.current = null
     onSuccessRef.current = null
     successMessageRef.current = null
     dispatch({ type: 'close' })
@@ -217,6 +247,10 @@ export function SsoTestSignInProvider({ children }: { children: ReactNode }) {
       })
       return
     }
+    // Stash the testId so the last-chance poll in onPopupClosed can
+    // resolve close-races where the popup shut before the regular
+    // polling interval saw the Redis result.
+    activeTestIdRef.current = r.testId
     trackPopup(popup)
     clearPoll()
     let pollCount = 0
