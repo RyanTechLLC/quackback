@@ -169,10 +169,16 @@ export async function getPublicRoadmapPosts(
 
   const { statusId, limit = 20, offset = 0 } = options
 
-  // Build base conditions + filter conditions
+  // Build base conditions + filter conditions.
+  // Public view: only published posts are visible. A team member can
+  // link a post in any moderation state to the roadmap, but pending /
+  // spam / archived / closed posts are not for public consumption.
+  // The team-facing getRoadmapPosts above intentionally omits this
+  // filter so admins can see pending items on the admin roadmap.
   const baseConditions: ReturnType<typeof eq>[] = [
     eq(postRoadmaps.roadmapId, roadmapId),
     isNull(posts.deletedAt),
+    eq(posts.moderationState, 'published'),
   ]
   if (statusId) {
     baseConditions.push(eq(posts.statusId, statusId))
