@@ -173,6 +173,19 @@ async function createAuth() {
         clientSecret,
         discoveryUrl: cfg.discoveryUrl,
         scopes: ['openid', 'email', 'profile'],
+        // Better-Auth's `genericOAuth` plugin defaults pkce OFF — the
+        // codeVerifier is only generated/sent when `pkce: true` is in
+        // the config (see plugins/generic-oauth/routes.mjs:94:
+        // `codeVerifier: pkce ? codeVerifier : void 0`). PKCE is
+        // strongly recommended for confidential clients and required
+        // by spec-strict IdPs (including better-auth's own
+        // oidc-provider when `requirePKCE: true` — which the sister
+        // InterpriseOne deployment uses). Without this flag,
+        // authorize rejects with `error=invalid_request&error_description=
+        // pkce is required` and we never reach the code exchange.
+        // The test handshake adds PKCE manually for the same reason;
+        // production needs the same coverage.
+        pkce: true,
         // Force the IdP to show the account-picker. Without this, an
         // admin typing demo@example.com at the login form gets
         // silently signed in as whoever the IdP already has a
@@ -244,6 +257,13 @@ async function createAuth() {
         ...(creds.authorizationUrl && { authorizationUrl: creds.authorizationUrl }),
         ...(creds.tokenUrl && { tokenUrl: creds.tokenUrl }),
         scopes: scopeStr.split(/\s+/).filter(Boolean),
+        // PKCE on by default for the same reasons as the `sso` block
+        // above. Better-Auth's plugin defaults this OFF; we want every
+        // generic-oauth integration to use PKCE regardless of which IdP
+        // it points at, so a future tenant pointing at a strict IdP
+        // doesn't get a cryptic `pkce is required` failure on first
+        // sign-in.
+        pkce: true,
       })
       trustedProviders.push(provider.id)
     } else {
