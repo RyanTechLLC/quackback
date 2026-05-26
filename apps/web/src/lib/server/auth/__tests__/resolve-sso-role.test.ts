@@ -105,4 +105,50 @@ describe('resolveSsoRole', () => {
   it('returns null when no mapping is provided', () => {
     expect(resolveSsoRole({ groups: ['admin'] }, undefined)).toBeNull()
   })
+
+  // Pins the InterpriseOne integration shape so a future refactor of
+  // either resolver can't silently break the role auto-assignment that
+  // tenants relying on InterpriseOne as their IdP depend on. The IdP's
+  // `oidcProvider` config exposes the user's internal role via
+  // `getAdditionalUserInfoClaim` as a scalar string `internal_role`
+  // (values: OWNER / TENANT_ADMIN / ADMIN / USER per its `roles.ts`).
+  // The corresponding Quackback mapping uses claimPath='internal_role'
+  // with one rule per IdP role that should be promoted above the
+  // defaultRole (which keeps casual InterpriseOne users in the
+  // Quackback `user` portal-only bucket).
+  describe('InterpriseOne integration shape', () => {
+    const interpriseOneMapping: NonNullable<AuthConfig['ssoOidc']>['attributeMapping'] = {
+      claimPath: 'internal_role',
+      rules: [
+        { whenContains: 'OWNER', role: 'admin' },
+        { whenContains: 'TENANT_ADMIN', role: 'admin' },
+        { whenContains: 'ADMIN', role: 'member' },
+      ],
+      defaultRole: 'user',
+    }
+
+    it('promotes an OWNER to admin', () => {
+      expect(resolveSsoRole({ internal_role: 'OWNER' }, interpriseOneMapping)).toBe('admin')
+    })
+
+    it('promotes a TENANT_ADMIN to admin', () => {
+      expect(resolveSsoRole({ internal_role: 'TENANT_ADMIN' }, interpriseOneMapping)).toBe('admin')
+    })
+
+    it('promotes a plain ADMIN to member', () => {
+      expect(resolveSsoRole({ internal_role: 'ADMIN' }, interpriseOneMapping)).toBe('member')
+    })
+
+    it('keeps a plain USER on the portal-only default role', () => {
+      expect(resolveSsoRole({ internal_role: 'USER' }, interpriseOneMapping)).toBe('user')
+    })
+
+    it("falls through to the default when InterpriseOne doesn't emit the claim", () => {
+      // Older InterpriseOne deploys (or tenants who haven't enabled
+      // `getAdditionalUserInfoClaim`) would send an id_token without
+      // `internal_role`. The default role keeps them signed in as
+      // portal-only; an admin can promote manually after the fact.
+      expect(resolveSsoRole({ sub: '123', email: 'x@y.z' }, interpriseOneMapping)).toBe('user')
+    })
+  })
 })
