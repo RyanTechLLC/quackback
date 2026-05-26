@@ -124,11 +124,28 @@ export function actorFromAuth(auth: AuthContext): AuditActor {
   }
 }
 
+/**
+ * Upper bound on the stored request_id. PostgreSQL's btree refuses
+ * index entries above ~2700 bytes; recordAuditEvent's catch swallows
+ * insert failures, so an attacker who can set the x-request-id header
+ * could otherwise silently suppress security events by sending a
+ * multi-KB value. 256 chars is comfortably above every legitimate
+ * correlation-id format (UUIDs, ULIDs, hex hashes, TypeIDs, OpenTelemetry
+ * traceparent payloads) while well below the btree limit.
+ */
+const REQUEST_ID_MAX_LEN = 256
+
+function capRequestId(value: string | null): string | null {
+  if (value === null) return null
+  return value.length > REQUEST_ID_MAX_LEN ? value.slice(0, REQUEST_ID_MAX_LEN) : value
+}
+
 export async function recordAuditEvent(input: RecordAuditEventInput): Promise<void> {
   const ip = input.headers ? getClientIp(input.headers) : null
   const userAgent = input.headers?.get('user-agent') ?? null
-  const requestId =
+  const requestId = capRequestId(
     input.headers?.get('x-request-id') ?? input.headers?.get('x-correlation-id') ?? null
+  )
 
   try {
     await db.insert(auditLog).values({

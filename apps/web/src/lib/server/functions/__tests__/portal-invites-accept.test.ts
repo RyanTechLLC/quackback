@@ -45,6 +45,10 @@ const hoisted = vi.hoisted(() => ({
   mockRequireAuth: vi.fn(),
   mockRecordAuditEvent: vi.fn(),
   mockDbUpdate: vi.fn(),
+  // The accept handler now uses RETURNING to detect zero-row writes
+  // (concurrent cancel / expiry / accept race). Tests can override this
+  // per-case to simulate the race.
+  mockDbUpdateReturning: vi.fn(() => Promise.resolve([{ id: 'invite_1' }])),
   mockDbQuery: {
     invitation: { findFirst: vi.fn() },
     principal: { findFirst: vi.fn() },
@@ -81,7 +85,7 @@ vi.mock('@/lib/server/db', () => {
     set: () => ({
       where: (...args: unknown[]) => {
         hoisted.mockDbUpdate(...args)
-        return { returning: () => Promise.resolve([{ id: 'invite_1' }]) }
+        return { returning: () => hoisted.mockDbUpdateReturning() }
       },
     }),
   }
@@ -183,6 +187,8 @@ beforeEach(async () => {
   hoisted.mockDbQuery.invitation.findFirst.mockResolvedValue(PENDING_INVITE)
   hoisted.mockDbQuery.principal.findFirst.mockResolvedValue(null)
   hoisted.mockDbUpdate.mockResolvedValue(undefined)
+  // Default: the UPDATE finds + accepts the row (1 row returned).
+  hoisted.mockDbUpdateReturning.mockResolvedValue([{ id: 'invite_1' }])
   hoisted.mockRecordAuditEvent.mockResolvedValue(undefined)
   hoisted.mockRequireAuth.mockResolvedValue(undefined)
   hoisted.mockSendPortalInviteEmail.mockResolvedValue({ sent: false })
@@ -473,5 +479,80 @@ describe('acceptPortalInviteFn — emailVerified gate (security)', () => {
     const r = result as { status: string; alreadyAccepted: boolean }
     expect(r.status).toBe('accepted')
     expect(r.alreadyAccepted).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TOCTOU — concurrent state mutation between read and write
+// ---------------------------------------------------------------------------
+
+describe('acceptPortalInviteFn — TOCTOU concurrent state', () => {
+  // The accept path reads the invite, validates status/email/expiry, then
+  // UPDATEs. A concurrent accept, cancel, or expiry sweep can mutate the
+  // row between read and write. The UPDATE must serialize the final state
+  // mutation via its WHERE clause + RETURNING — zero affected rows triggers
+  // a re-read so we report the actual terminal state, never overwrite a
+  // canceled/expired/already-accepted row, and never emit a duplicate
+  // 'portal.invite.accepted' audit event.
+
+  it('does NOT emit accepted audit when UPDATE affects zero rows (concurrent accept won)', async () => {
+    // Initial read sees pending (default). A concurrent caller wins the
+    // accept race — our UPDATE WHERE status='pending' matches zero rows.
+    // Re-read shows the row is now 'accepted'. Return alreadyAccepted=true
+    // with NO new audit event.
+    hoisted.mockDbUpdateReturning.mockResolvedValueOnce([])
+    // Re-read after UPDATE returns 0 rows — the row is now accepted.
+    hoisted.mockDbQuery.invitation.findFirst
+      .mockResolvedValueOnce(PENDING_INVITE) // initial read
+      .mockResolvedValueOnce({ ...PENDING_INVITE, status: 'accepted' }) // re-read
+
+    const result = await acceptHandler({ data: { inviteId: 'invite_1' } })
+    const r = result as { status: string; alreadyAccepted: boolean }
+    expect(r.status).toBe('accepted')
+    expect(r.alreadyAccepted).toBe(true)
+    // CRITICAL: no second audit event for the same accepted invite.
+    expect(hoisted.mockRecordAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('returns canceled when zero-row UPDATE + re-read shows canceled', async () => {
+    // Admin canceled the invite between our read and our write. The UPDATE
+    // doesn't match (status was flipped to 'canceled'). Re-read confirms.
+    hoisted.mockDbUpdateReturning.mockResolvedValueOnce([])
+    hoisted.mockDbQuery.invitation.findFirst
+      .mockResolvedValueOnce(PENDING_INVITE)
+      .mockResolvedValueOnce({ ...PENDING_INVITE, status: 'canceled' })
+
+    const result = await acceptHandler({ data: { inviteId: 'invite_1' } })
+    expect((result as { status: string }).status).toBe('canceled')
+    expect(hoisted.mockRecordAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('returns expired when zero-row UPDATE + re-read shows past expiresAt', async () => {
+    // The expiry sweep ran between read and write — or the invite crossed
+    // expiresAt at the moment of the UPDATE. The WHERE clause's
+    // expires_at > now() rejects the write. Re-read shows past expiresAt.
+    hoisted.mockDbUpdateReturning.mockResolvedValueOnce([])
+    hoisted.mockDbQuery.invitation.findFirst
+      .mockResolvedValueOnce(PENDING_INVITE)
+      .mockResolvedValueOnce({ ...PENDING_INVITE, expiresAt: PAST })
+
+    const result = await acceptHandler({ data: { inviteId: 'invite_1' } })
+    expect((result as { status: string }).status).toBe('expired')
+    expect(hoisted.mockRecordAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('UPDATE WHERE clause constrains status=pending (atomicity guarantee)', async () => {
+    // Pin the SQL contract: the WHERE clause passed to db.update.set.where
+    // must include a status='pending' predicate (or equivalent) so it can
+    // never overwrite a canceled/accepted row. Inspecting the captured
+    // args is the simplest assertion; the real predicate uses `and(...)`.
+    await acceptHandler({ data: { inviteId: 'invite_1' } })
+
+    expect(hoisted.mockDbUpdate).toHaveBeenCalledOnce()
+    // The mocked `and()` returns its args as an array — flatten + stringify
+    // and look for the status='pending' equality.
+    const flatten = (v: unknown): string => JSON.stringify(v)
+    const allArgs = hoisted.mockDbUpdate.mock.calls.flat().map(flatten).join(' ')
+    expect(allArgs).toMatch(/"col":"status".*"val":"pending"/)
   })
 })

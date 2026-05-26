@@ -61,6 +61,24 @@ const state: { rows: Row[]; auditEvents: Array<Record<string, unknown>> } = {
   auditEvents: [],
 }
 
+// Priority lookup duplicated here so the mock can implement the same
+// semantics as the production SQL setWhere predicate. Production uses a
+// SQL CASE expression; the mock evaluates the equivalent JS lookup.
+const MOCK_PRIORITY: Record<string, number> = {
+  manual: 5,
+  api: 4,
+  widget: 3,
+  sso: 2,
+  dynamic: 1,
+}
+
+// Track every onConflictDoUpdate call so contract tests can pin the
+// predicate shape (presence of setWhere, target columns, etc.).
+const upsertCalls: Array<{
+  values: Row | Row[]
+  conflict: { target: unknown; set: Record<string, unknown>; setWhere: unknown }
+}> = []
+
 vi.mock('@/lib/server/db', () => {
   return {
     db: {
@@ -73,9 +91,51 @@ vi.mock('@/lib/server/db', () => {
         })),
       })),
       insert: vi.fn(() => ({
-        values: vi.fn(async (row: Row | Row[]) => {
-          const rows = Array.isArray(row) ? row : [row]
-          state.rows.push(...rows)
+        values: vi.fn((row: Row | Row[]) => {
+          // Two consumers of values():
+          //   a) bare insert (no upsert): legacy path the old addMember
+          //      used + reconcileSsoMemberships still uses for its delete.
+          //   b) values(...).onConflictDoUpdate({...}): the new addMember
+          //      upsert. Apply priority semantics in JS to mirror the
+          //      SQL setWhere predicate.
+          //
+          // Return a thenable so `await db.insert().values(...)` still
+          // works for path (a), plus an onConflictDoUpdate method for (b).
+          const apply = () => {
+            const rows = Array.isArray(row) ? row : [row]
+            state.rows.push(...rows)
+          }
+          return {
+            // Path (a)
+            then(onFulfilled: (v: void) => void) {
+              apply()
+              return Promise.resolve().then(onFulfilled)
+            },
+            // Path (b)
+            onConflictDoUpdate: async (conflict: {
+              target: unknown
+              set: Record<string, unknown>
+              setWhere: unknown
+            }) => {
+              upsertCalls.push({ values: row, conflict })
+              const incoming = Array.isArray(row) ? row[0] : row
+              const existing = state.rows.find(
+                (r) => r.principalId === incoming.principalId && r.segmentId === incoming.segmentId
+              )
+              if (!existing) {
+                state.rows.push(incoming)
+                return
+              }
+              // Mirror the production setWhere: only update when the
+              // incoming source's priority exceeds the existing's.
+              const newPriority = MOCK_PRIORITY[String(conflict.set.addedBy)]
+              const existingPriority = MOCK_PRIORITY[existing.addedBy]
+              if (newPriority > existingPriority) {
+                existing.addedBy = String(conflict.set.addedBy)
+              }
+              // else: no-op (preserves stickier source)
+            },
+          }
         }),
       })),
       update: vi.fn(() => ({
@@ -104,6 +164,13 @@ vi.mock('@/lib/server/db', () => {
         col: col.__col,
         vals,
       })
+    ),
+    sql: Object.assign(
+      vi.fn((parts: TemplateStringsArray, ..._values: unknown[]) => ({
+        kind: 'sql',
+        text: parts.raw.join('?'),
+      })),
+      { raw: vi.fn() }
     ),
   }
 })
@@ -134,6 +201,7 @@ const ACTOR_ADMIN = { userId: null, email: 'admin@x', role: 'admin' as const }
 beforeEach(() => {
   state.rows = []
   state.auditEvents = []
+  upsertCalls.length = 0
 })
 
 // ----------------------------------------------------------------------
@@ -367,5 +435,91 @@ describe('segmentIdsForPrincipal', () => {
     const ids = await segmentIdsForPrincipal(P1)
     // TypeScript enforces this — but assert the runtime shape too.
     expect(ids instanceof Set).toBe(true)
+  })
+})
+
+// ----------------------------------------------------------------------
+// addMember — atomic upsert (TOCTOU resistance)
+// ----------------------------------------------------------------------
+
+describe('addMember — atomic upsert prevents source-priority races', () => {
+  // Codex finding: the legacy read-then-write let a lower-priority
+  // concurrent writer demote a manual/admin assignment. Fix replaces
+  // the two-step dance with INSERT … ON CONFLICT DO UPDATE … WHERE
+  // <priority compare>, so the priority check and the write are a
+  // single atomic statement.
+  //
+  // These tests pin the upsert call shape so a refactor that drops
+  // the atomic predicate fails immediately.
+
+  it('uses INSERT … ON CONFLICT DO UPDATE with target on the (principalId, segmentId) pair', async () => {
+    await addMember({
+      principalId: P1,
+      segmentId: S1,
+      source: 'manual',
+      actor: ACTOR_NULL,
+    })
+
+    expect(upsertCalls).toHaveLength(1)
+    const call = upsertCalls[0]
+    expect(call.conflict.target).toBeDefined()
+    // setWhere MUST be present — it carries the priority predicate.
+    // Without it, every conflict would unconditionally overwrite.
+    expect(call.conflict.setWhere).toBeDefined()
+  })
+
+  it('sets addedBy to the incoming source in the conflict UPDATE', async () => {
+    await addMember({
+      principalId: P1,
+      segmentId: S1,
+      source: 'manual',
+      actor: ACTOR_NULL,
+    })
+
+    expect(upsertCalls[0].conflict.set).toEqual(expect.objectContaining({ addedBy: 'manual' }))
+  })
+
+  it('does NOT use the legacy SELECT-then-INSERT-or-UPDATE pattern', async () => {
+    // Sanity: the new code should never go through the bare db.update
+    // path that the old addMember used. Removal still uses db.delete
+    // and SSO reconcile still uses bare insert (for new rows) +
+    // db.delete (for dropped rows) — verify addMember itself stays
+    // on the atomic upsert.
+    await addMember({
+      principalId: P1,
+      segmentId: S1,
+      source: 'sso',
+      actor: ACTOR_NULL,
+    })
+    expect(upsertCalls).toHaveLength(1)
+  })
+
+  it('priority guard holds when a lower-priority source races against an existing manual row', async () => {
+    // Simulate the race: manual row already exists; an SSO sync
+    // arrives concurrently. The atomic upsert's setWhere predicate
+    // must reject the demotion.
+    state.rows.push({ principalId: P1, segmentId: S1, addedBy: 'manual' })
+
+    await addMember({
+      principalId: P1,
+      segmentId: S1,
+      source: 'sso',
+      actor: ACTOR_NULL,
+    })
+
+    expect(state.rows[0].addedBy).toBe('manual')
+  })
+
+  it('priority guard allows a higher-priority source to promote an existing lower row', async () => {
+    state.rows.push({ principalId: P1, segmentId: S1, addedBy: 'sso' })
+
+    await addMember({
+      principalId: P1,
+      segmentId: S1,
+      source: 'manual',
+      actor: ACTOR_NULL,
+    })
+
+    expect(state.rows[0].addedBy).toBe('manual')
   })
 })

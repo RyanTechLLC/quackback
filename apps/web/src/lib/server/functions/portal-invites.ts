@@ -540,11 +540,51 @@ export const acceptPortalInviteFn = createServerFn({ method: 'POST' })
       return { status: 'expired' }
     }
 
-    // All checks passed — accept the invite.
-    await db
+    // All checks passed — accept the invite atomically.
+    //
+    // The WHERE clause serializes the final state mutation across
+    // concurrent callers. Between the initial read above and this
+    // UPDATE, another caller could have accepted, an admin could have
+    // canceled, or the sweep could have flipped the row to expired.
+    // Pinning status='pending' + expires_at > now() + email match in
+    // the predicate makes the write a no-op in those races. RETURNING
+    // surfaces zero-row outcomes; we then re-read to report the
+    // actual terminal state and skip the audit event.
+    const updated = await db
       .update(invitation)
       .set({ status: 'accepted' })
-      .where(and(eq(invitation.id, inviteId), eq(invitation.kind, 'portal')))
+      .where(
+        and(
+          eq(invitation.id, inviteId),
+          eq(invitation.kind, 'portal'),
+          eq(invitation.status, 'pending'),
+          sql`lower(${invitation.email}) = ${sessionEmail}`,
+          gt(invitation.expiresAt, new Date())
+        )
+      )
+      .returning()
+
+    if (updated.length === 0) {
+      // Concurrent state change. Re-read to determine what won.
+      const fresh = await db.query.invitation.findFirst({
+        where: and(eq(invitation.id, inviteId), eq(invitation.kind, 'portal')),
+      })
+      if (!fresh) {
+        // Vanishingly rare (would require a hard delete) — treat as not-found.
+        throw new Error('PORTAL_INVITE_NOT_FOUND')
+      }
+      console.log(
+        `[fn:portal-invites] acceptPortalInviteFn: TOCTOU lost — terminal state status=${fresh.status} expired=${new Date(fresh.expiresAt) < new Date()}`
+      )
+      if (fresh.status === 'accepted') {
+        return { status: 'accepted', alreadyAccepted: true }
+      }
+      if (fresh.status === 'canceled') {
+        return { status: 'canceled' }
+      }
+      // Still 'pending' but the expires_at predicate rejected → must be expired.
+      return { status: 'expired' }
+    }
 
     // Build a minimal actor from the session for the audit row.
     const principalRecord = await db.query.principal.findFirst({

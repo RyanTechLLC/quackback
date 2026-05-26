@@ -10,7 +10,7 @@
  * and reconcileSsoMemberships can therefore safely delete only the
  * rows whose addedBy is still 'sso'.
  */
-import { db, userSegments, eq, and, inArray } from '@/lib/server/db'
+import { db, userSegments, eq, and, inArray, sql } from '@/lib/server/db'
 import { recordAuditEvent, type AuditActor } from '@/lib/server/audit/log'
 import type { PrincipalId, SegmentId } from '@quackback/ids'
 
@@ -38,39 +38,48 @@ export interface AddMemberInput {
   headers?: Headers
 }
 
+/**
+ * Insert or upgrade a segment membership atomically.
+ *
+ * The previous implementation read the row, decided priority in JS,
+ * then INSERTed or UPDATEd. A concurrent lower-priority writer could
+ * commit after a higher-priority writer read the old state and
+ * silently demote the row — losing manual/admin access on a later
+ * SSO reconcile. The fix is a single INSERT … ON CONFLICT DO UPDATE
+ * with a SQL-evaluated priority predicate, so the priority check and
+ * the write are one statement and cannot interleave.
+ *
+ * The `setWhere` predicate fires the UPDATE only when the incoming
+ * source has strictly higher priority than the existing row. On equal
+ * priority the existing row wins (no-op), mirroring the legacy
+ * `newPriority > existingPriority` check.
+ */
 export async function addMember(input: AddMemberInput): Promise<void> {
-  const existing = await db
-    .select({ addedBy: userSegments.addedBy })
-    .from(userSegments)
-    .where(
-      and(
-        eq(userSegments.principalId, input.principalId),
-        eq(userSegments.segmentId, input.segmentId)
-      )
-    )
-
-  if (existing.length === 0) {
-    await db.insert(userSegments).values({
+  await db
+    .insert(userSegments)
+    .values({
       principalId: input.principalId,
       segmentId: input.segmentId,
       addedBy: input.source,
     })
-  } else {
-    const existingPriority = SOURCE_PRIORITY[existing[0].addedBy as MembershipSource]
-    const newPriority = SOURCE_PRIORITY[input.source]
-    if (newPriority > existingPriority) {
-      await db
-        .update(userSegments)
-        .set({ addedBy: input.source })
-        .where(
-          and(
-            eq(userSegments.principalId, input.principalId),
-            eq(userSegments.segmentId, input.segmentId)
-          )
-        )
-    }
-    // Otherwise keep the stickier source untouched.
-  }
+    .onConflictDoUpdate({
+      target: [userSegments.principalId, userSegments.segmentId],
+      set: { addedBy: input.source },
+      // SQL-evaluated equivalent of SOURCE_PRIORITY[input.source] >
+      // SOURCE_PRIORITY[existing.addedBy]. Incoming priority is a
+      // numeric literal known at call time; existing priority is
+      // computed from the stored addedBy via a CASE expression.
+      setWhere: sql`(
+        CASE ${userSegments.addedBy}
+          WHEN 'manual' THEN ${SOURCE_PRIORITY.manual}
+          WHEN 'api' THEN ${SOURCE_PRIORITY.api}
+          WHEN 'widget' THEN ${SOURCE_PRIORITY.widget}
+          WHEN 'sso' THEN ${SOURCE_PRIORITY.sso}
+          WHEN 'dynamic' THEN ${SOURCE_PRIORITY.dynamic}
+          ELSE 0
+        END
+      ) < ${SOURCE_PRIORITY[input.source]}`,
+    })
 
   if (input.actor) {
     await recordAuditEvent({
