@@ -16,23 +16,46 @@ export type OAuthProviderEntry = {
 }
 
 /**
+ * The URL Better-Auth's OAuth callback redirects the popup to AFTER the
+ * authorization-code → session exchange succeeds. We always send the
+ * popup to `/auth/auth-complete`, which fires `postAuthSuccess()` over
+ * BroadcastChannel and closes the window. The opener's
+ * `useAuthBroadcast` listener picks up the message and navigates the
+ * MAIN tab to whatever post-login URL the caller actually wanted
+ * (e.g. `/` for the portal, the original deep link otherwise).
+ *
+ * Without this override the popup would land directly on the caller's
+ * `callbackUrl` (typically `/`), never broadcasting and never closing —
+ * the main tab stays on the login form with no signal that auth
+ * finished, and the user has to manually close the popup and reload.
+ */
+const POPUP_BROADCAST_URL = '/auth/auth-complete'
+
+/**
  * Get the OAuth redirect URL for a provider.
  * Handles routing between signIn.oauth2 (generic) and signIn.social (built-in).
+ *
+ * `callbackURL` here is the value Better-Auth uses post-callback — we
+ * hard-code it to `POPUP_BROADCAST_URL` so the popup always reaches the
+ * close-and-broadcast page. The caller-supplied destination is honored
+ * separately by the opener via `useAuthBroadcast` (see below).
  */
 export async function getOAuthRedirectUrl(
   provider: OAuthProviderEntry,
-  callbackURL: string
+  // Accepted for API compatibility but intentionally unused — see the
+  // POPUP_BROADCAST_URL comment above.
+  _callbackURL: string
 ): Promise<string | null> {
   const result =
     provider.type === 'generic-oauth'
       ? await authClient.signIn.oauth2({
           providerId: provider.id,
-          callbackURL,
+          callbackURL: POPUP_BROADCAST_URL,
           disableRedirect: true,
         })
       : await authClient.signIn.social({
           provider: provider.id,
-          callbackURL,
+          callbackURL: POPUP_BROADCAST_URL,
           disableRedirect: true,
         })
   return result.data?.url ?? null
