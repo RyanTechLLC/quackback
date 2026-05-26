@@ -309,14 +309,16 @@ function BuiltinFieldRow({ field }: { field: (typeof BUILTIN_FIELDS)[number] }) 
           >
             {typeLabel}
           </span>
-          <span className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded border bg-muted/60 text-muted-foreground border-border/40">
-            Built-in
-          </span>
         </div>
         {field.description && (
           <p className="text-xs text-muted-foreground mt-0.5 truncate">{field.description}</p>
         )}
       </div>
+
+      {/* Right-aligned 'Built-in' marker — occupies the same slot as
+       *  the edit/delete buttons on custom rows so the two row types
+       *  align visually down the right edge. */}
+      <span className="text-xs text-muted-foreground shrink-0 pr-2">Built-in</span>
     </div>
   )
 }
@@ -391,27 +393,23 @@ export function UserAttributesList({ initialAttributes }: UserAttributesListProp
         </Button>
       }
     >
-      {/* Built-in fields — render rows directly with no sub-heading;
-       *  the section is self-explanatory via the per-row 'Built-in' badge. */}
-      <div className="mb-6">
+      {/* Built-in + custom rows share one container so they read as
+       *  a single continuous list and `last:border-0` only trims the
+       *  actual last row's divider. The per-row 'Built-in' badge is
+       *  the only marker separating the two groups. */}
+      <div>
         {BUILTIN_FIELDS.filter((f) => f.group === 'attribute').map((field) => (
           <BuiltinFieldRow key={field.key} field={field} />
         ))}
+        {attributes.map((attr) => (
+          <AttributeRow
+            key={attr.id}
+            attribute={attr}
+            onEdit={() => setEditTarget(attr)}
+            onDelete={() => setDeleteTarget(attr)}
+          />
+        ))}
       </div>
-
-      {/* Custom attributes */}
-      {attributes.length > 0 && (
-        <div>
-          {attributes.map((attr) => (
-            <AttributeRow
-              key={attr.id}
-              attribute={attr}
-              onEdit={() => setEditTarget(attr)}
-              onDelete={() => setDeleteTarget(attr)}
-            />
-          ))}
-        </div>
-      )}
 
       {/* Create dialog */}
       <AttributeFormDialog
