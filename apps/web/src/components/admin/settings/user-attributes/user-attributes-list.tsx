@@ -391,19 +391,12 @@ export function UserAttributesList({ initialAttributes }: UserAttributesListProp
         </Button>
       }
     >
-      {/* Built-in fields sub-section */}
+      {/* Built-in fields — render rows directly with no sub-heading;
+       *  the section is self-explanatory via the per-row 'Built-in' badge. */}
       <div className="mb-6">
-        <div className="mb-3">
-          <h3 className="text-sm font-medium text-foreground">Built-in fields</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Platform attributes stored on every user. Read-only.
-          </p>
-        </div>
-        <div>
-          {BUILTIN_FIELDS.filter((f) => f.group === 'attribute').map((field) => (
-            <BuiltinFieldRow key={field.key} field={field} />
-          ))}
-        </div>
+        {BUILTIN_FIELDS.filter((f) => f.group === 'attribute').map((field) => (
+          <BuiltinFieldRow key={field.key} field={field} />
+        ))}
       </div>
 
       {/* Custom attributes */}
