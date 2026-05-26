@@ -31,6 +31,13 @@ import {
   getFieldOperators,
 } from '@/lib/shared/segment-builtin-fields'
 import type { FieldOperator } from '@/lib/shared/segment-builtin-fields'
+import { SearchableInput } from '@/components/ui/searchable-input'
+import { fetchSegmentAttributeValuesFn } from '@/lib/server/functions/admin'
+
+// Attributes with DB-backed value typeahead. Matches SEARCHABLE_ATTRIBUTES
+// in segment-attribute-values.ts; kept duplicated here to avoid pulling
+// a server-only module into the client bundle.
+const SEARCHABLE_VALUE_ATTRIBUTES = new Set(['country', 'locale', 'name', 'email', 'signup_source'])
 
 export const CUSTOM_ATTR_PREFIX = '__custom__'
 
@@ -142,6 +149,15 @@ function RuleConditionRow({
 
   // Enum fields with a fixed set of allowed values (e.g. principal_type)
   const allowedValues = builtinField?.allowedValues
+  // DB-backed value typeahead — skipped for substring operators (the
+  // user is searching for a fragment, not picking an exact value) and
+  // for the enum-style allowedValues path which uses a strict Select.
+  const isSubstringOp =
+    condition.operator === 'contains' ||
+    condition.operator === 'starts_with' ||
+    condition.operator === 'ends_with'
+  const useSearchableInput =
+    !isSubstringOp && !allowedValues && SEARCHABLE_VALUE_ATTRIBUTES.has(condition.attribute)
 
   const isPresenceOp = condition.operator === 'is_set' || condition.operator === 'is_not_set'
 
@@ -280,7 +296,33 @@ function RuleConditionRow({
           </SelectContent>
         </Select>
       )}
-      {!isPresenceOp && !allowedValues && !isBoolean && (
+      {!isPresenceOp && !allowedValues && !isBoolean && useSearchableInput && (
+        <SearchableInput
+          className="flex-1"
+          value={condition.value}
+          onChange={(v) => onChange({ ...condition, value: v })}
+          placeholder="Type to search"
+          fetchOptions={async (query) => {
+            const res = await fetchSegmentAttributeValuesFn({
+              data: {
+                attribute: condition.attribute as
+                  | 'country'
+                  | 'locale'
+                  | 'name'
+                  | 'email'
+                  | 'signup_source',
+                query,
+                limit: 20,
+              },
+            })
+            return res.values.map((v) => ({
+              value: v.value,
+              meta: `${v.count} ${v.count === 1 ? 'person' : 'people'}`,
+            }))
+          }}
+        />
+      )}
+      {!isPresenceOp && !allowedValues && !isBoolean && !useSearchableInput && (
         <Input
           className="h-8 text-xs flex-1"
           type={isNumeric ? 'number' : 'text'}
@@ -507,8 +549,8 @@ export function SegmentFormDialog({
                 trigger evaluation.
               </p>
               <p className="text-xs text-muted-foreground">
-                Heads up: segments only include your portal users. Your team and admins won't show
-                up here, even if they match the rules.
+                Heads up: segments only include people in your audience. Your team and admins won't
+                show up here, even if they match the rules.
               </p>
               <RuleBuilder
                 match={ruleMatch}
