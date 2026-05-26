@@ -77,6 +77,7 @@ export function AuthSettings({
           initialOauth={portalOauth}
           credentialStatus={credentialStatus}
           customOidcProviderTier={customOidcProviderTier}
+          ssoEnabled={teamAuthConfig.ssoOidc?.enabled === true}
         />
       </TabsContent>
     </Tabs>

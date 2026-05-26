@@ -24,6 +24,14 @@ interface PortalAuthTabProps {
   initialOauth: PortalAuthMethods
   credentialStatus: Record<string, boolean> & { _emailConfigured?: boolean }
   customOidcProviderTier: boolean
+  /** True when the workspace's SSO IdP is configured + enabled
+   *  (`authConfig.ssoOidc.enabled === true`). When true, the legacy
+   *  Custom OIDC card is replaced by a deprecation banner pointing
+   *  at the unified SSO settings page — `sso` already surfaces as a
+   *  portal sign-in button via `getEnabledOAuthProviders` so there's
+   *  no reason for an admin to keep maintaining a duplicate
+   *  `auth_custom-oidc` credentials row. */
+  ssoEnabled: boolean
 }
 
 /**
@@ -50,6 +58,7 @@ export function PortalAuthTab({
   initialOauth,
   credentialStatus,
   customOidcProviderTier,
+  ssoEnabled,
 }: PortalAuthTabProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -180,23 +189,54 @@ export function PortalAuthTab({
         </div>
       </div>
 
-      {/* Card — Custom OIDC (own surface; not in the social grid) */}
-      <CustomOidcCard
-        configured={!!credentialStatus['custom-oidc']}
-        enabled={!!oauthState['custom-oidc']}
-        managed={isManaged('portalConfig.oauth.custom-oidc')}
-        lastMethod={isLastMethod('custom-oidc')}
-        tierEnabled={customOidcProviderTier}
-        saving={saving || isPending}
-        onToggle={(v) => handleToggle('custom-oidc', v)}
-        onConfigure={() => {
-          // Look up by provider id (not credentialType — that's what
-          // `getAuthProvider(...)` takes). Inline lookup avoids the wrong
-          // helper.
-          const provider = AUTH_PROVIDERS.find((p) => p.id === 'custom-oidc')
-          if (provider) openConfigDialog(provider)
-        }}
-      />
+      {/* Card — Custom OIDC (own surface; not in the social grid).
+          When the workspace has SSO configured, hide the duplicate
+          configuration surface and replace it with a banner pointing
+          at the unified SSO settings page. Pre-Chunk-1 these two were
+          the only way to get a portal-side OIDC button; Chunk 1 wired
+          the `sso` provider into both surfaces so this card now
+          represents legacy state for tenants that pre-dated SSO. We
+          keep it visible (not auto-deleted) for tenants who haven't
+          set up SSO yet so they're not stranded mid-migration. */}
+      {ssoEnabled ? (
+        <div className="rounded-lg border border-border/50 bg-muted/30 p-4">
+          <div className="flex items-start gap-3">
+            <ShieldCheckIcon className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold">Single sign-on is your portal IdP</h3>
+              <p className="text-sm text-muted-foreground">
+                Your workspace already has SSO configured under Single sign-on. The &ldquo;Continue
+                with&rdquo; button now appears on the portal sign-in page automatically — no
+                separate Custom OIDC configuration needed. Edit your identity provider once on the{' '}
+                <a
+                  href="/admin/settings/security/sso"
+                  className="font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  Single sign-on settings page
+                </a>
+                .
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <CustomOidcCard
+          configured={!!credentialStatus['custom-oidc']}
+          enabled={!!oauthState['custom-oidc']}
+          managed={isManaged('portalConfig.oauth.custom-oidc')}
+          lastMethod={isLastMethod('custom-oidc')}
+          tierEnabled={customOidcProviderTier}
+          saving={saving || isPending}
+          onToggle={(v) => handleToggle('custom-oidc', v)}
+          onConfigure={() => {
+            // Look up by provider id (not credentialType — that's what
+            // `getAuthProvider(...)` takes). Inline lookup avoids the wrong
+            // helper.
+            const provider = AUTH_PROVIDERS.find((p) => p.id === 'custom-oidc')
+            if (provider) openConfigDialog(provider)
+          }}
+        />
+      )}
 
       {(saving || isPending) && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
