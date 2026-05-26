@@ -334,10 +334,32 @@ export const resendPortalInviteFn = createServerFn({ method: 'POST' })
 
     const resendNow = new Date()
     const freshExpiresAt = new Date(resendNow.getTime() + PORTAL_INVITE_EXPIRY_MS)
-    await db
+    // Mirror the acceptPortalInviteFn TOCTOU fix: pin status='pending'
+    // in the WHERE clause so a concurrent accept/cancel/expiry sweep
+    // can't see this expiry-extension bring the row back to life.
+    // .returning() surfaces the zero-row race; we treat it as a terminal
+    // state collision and skip the audit event.
+    const updated = await db
       .update(invitation)
       .set({ lastSentAt: resendNow, expiresAt: freshExpiresAt })
-      .where(and(eq(invitation.id, inviteId), eq(invitation.kind, 'portal')))
+      .where(
+        and(
+          eq(invitation.id, inviteId),
+          eq(invitation.kind, 'portal'),
+          eq(invitation.status, 'pending')
+        )
+      )
+      .returning()
+
+    if (updated.length === 0) {
+      // Concurrent state change — invite is no longer pending. Don't
+      // record a misleading 'resent' audit event for a row that's
+      // since been accepted, canceled, or swept-expired.
+      console.warn(
+        `[fn:portal-invites] resendPortalInviteFn: TOCTOU lost — invite ${inviteId} no longer pending`
+      )
+      throw new Error('Portal invitation is no longer pending.')
+    }
 
     await recordAuditEvent({
       event: 'portal.invite.resent',

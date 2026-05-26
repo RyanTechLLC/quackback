@@ -552,6 +552,54 @@ describe('resendPortalInviteFn — success', () => {
   })
 })
 
+describe('resendPortalInviteFn — TOCTOU resilience', () => {
+  // The resend path reads the invite + sends a fresh magic link, then
+  // UPDATEs lastSentAt + expiresAt. A concurrent accept / cancel / sweep
+  // could flip the row to a terminal state between the SELECT and the
+  // UPDATE. Without a status='pending' predicate, the expiry extension
+  // would silently bring an accepted/canceled/expired row back into
+  // 'has a fresh deadline' territory and emit a misleading audit event.
+
+  it('throws when the UPDATE affects zero rows (lost the race)', async () => {
+    const futureDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+    hoisted.mockDbQuery.invitation.findFirst.mockResolvedValue({
+      id: 'invite_1',
+      kind: 'portal',
+      status: 'pending',
+      email: 'user@example.com',
+      expiresAt: futureDate,
+    })
+    hoisted.mockSendPortalInviteEmail.mockResolvedValue({ sent: true })
+    // Simulate: status flipped to 'accepted' between SELECT and UPDATE.
+    // The UPDATE's status='pending' predicate matches no rows.
+    hoisted.mockDbReturning.mockResolvedValueOnce([])
+
+    await expect(resendHandler({ data: { inviteId: 'invite_1' } })).rejects.toThrow(
+      'no longer pending'
+    )
+  })
+
+  it('does NOT emit portal.invite.resent on the lost-race path', async () => {
+    const futureDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+    hoisted.mockDbQuery.invitation.findFirst.mockResolvedValue({
+      id: 'invite_1',
+      kind: 'portal',
+      status: 'pending',
+      email: 'user@example.com',
+      expiresAt: futureDate,
+    })
+    hoisted.mockSendPortalInviteEmail.mockResolvedValue({ sent: true })
+    hoisted.mockDbReturning.mockResolvedValueOnce([])
+
+    await expect(resendHandler({ data: { inviteId: 'invite_1' } })).rejects.toThrow()
+
+    const resentEvent = hoisted.mockRecordAuditEvent.mock.calls.find(
+      (c) => (c[0] as { event: string }).event === 'portal.invite.resent'
+    )
+    expect(resentEvent).toBeUndefined()
+  })
+})
+
 // ---------------------------------------------------------------------------
 // 1F — batchId correlation + hasMessage PII guard
 // ---------------------------------------------------------------------------
