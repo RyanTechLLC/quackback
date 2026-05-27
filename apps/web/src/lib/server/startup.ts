@@ -121,30 +121,39 @@ export function logStartupBanner(): void {
     .then(({ initAnalyticsWorker }) => initAnalyticsWorker())
     .catch((err) => console.error('[Startup] Failed to init analytics worker:', err))
 
-  // Periodic feedback maintenance (stuck-item recovery every 15min, suggestion expiry daily)
+  // Periodic feedback maintenance (stuck-item recovery every 15min, suggestion expiry daily).
+  // Runs under a cross-instance lock so only one replica executes per tick.
   Promise.all([
     import('./domains/feedback/pipeline/stuck-recovery.service'),
     import('./domains/feedback/pipeline/suggestion.service'),
+    import('@/lib/server/sweep-lock'),
   ])
-    .then(([{ recoverStuckItems }, { expireStaleSuggestions }]) => {
+    .then(([{ recoverStuckItems }, { expireStaleSuggestions }, { withSweepLock }]) => {
+      const ONE_HOUR = 60 * 60 * 1000
       setTimeout(() => {
-        recoverStuckItems().catch((err: unknown) =>
-          console.error('[Startup] Initial stuck-item recovery failed:', err)
+        void withSweepLock('stuck_recovery', ONE_HOUR, () =>
+          recoverStuckItems().catch((err: unknown) =>
+            console.error('[Startup] Initial stuck-item recovery failed:', err)
+          )
         )
       }, 20_000) // 20s delay
       setInterval(
         () => {
-          recoverStuckItems().catch((err: unknown) =>
-            console.error('[Startup] Stuck-item recovery failed:', err)
+          void withSweepLock('stuck_recovery', ONE_HOUR, () =>
+            recoverStuckItems().catch((err: unknown) =>
+              console.error('[Startup] Stuck-item recovery failed:', err)
+            )
           )
         },
         15 * 60 * 1000
       ) // Every 15 minutes
       setInterval(
         () => {
-          expireStaleSuggestions().catch((err: unknown) =>
-            console.error('[Startup] Suggestion expiry failed:', err)
-          )
+          void withSweepLock('suggestion_expiry', ONE_HOUR, async () => {
+            await expireStaleSuggestions().catch((err: unknown) =>
+              console.error('[Startup] Suggestion expiry failed:', err)
+            )
+          })
         },
         24 * 60 * 60 * 1000
       ) // Daily
@@ -187,19 +196,26 @@ export function logStartupBanner(): void {
     })
     .catch((err) => console.error('[Startup] Failed to init audit-log maintenance:', err))
 
-  // Start periodic summary sweep (refreshes stale/missing post summaries)
-  // Runs once at startup (after a short delay) then every 30 minutes
-  import('./domains/summary/summary.service')
-    .then(({ refreshStaleSummaries }) => {
+  // Start periodic summary sweep (refreshes stale/missing post summaries).
+  // Runs under a cross-instance lock — AI calls are expensive, so only
+  // one replica should generate summaries per tick.
+  // Runs once at startup (after a short delay) then every 30 minutes.
+  Promise.all([import('./domains/summary/summary.service'), import('@/lib/server/sweep-lock')])
+    .then(([{ refreshStaleSummaries }, { withSweepLock }]) => {
+      const ONE_HOUR = 60 * 60 * 1000
       setTimeout(() => {
-        refreshStaleSummaries().catch((err) =>
-          console.error('[Startup] Initial summary sweep failed:', err)
+        void withSweepLock('summary_sweep', ONE_HOUR, () =>
+          refreshStaleSummaries().catch((err) =>
+            console.error('[Startup] Initial summary sweep failed:', err)
+          )
         )
       }, 5_000) // 5s delay to let other startup tasks finish
       setInterval(
         () => {
-          refreshStaleSummaries().catch((err) =>
-            console.error('[Startup] Summary sweep failed:', err)
+          void withSweepLock('summary_sweep', ONE_HOUR, () =>
+            refreshStaleSummaries().catch((err) =>
+              console.error('[Startup] Summary sweep failed:', err)
+            )
           )
         },
         30 * 60 * 1000
@@ -207,19 +223,29 @@ export function logStartupBanner(): void {
     })
     .catch((err) => console.error('[Startup] Failed to init summary sweep:', err))
 
-  // Start periodic merge suggestion sweep (detects duplicate posts)
-  // Runs once at startup (after a short delay) then every 30 minutes
-  import('./domains/merge-suggestions/merge-check.service')
-    .then(({ sweepMergeSuggestions }) => {
+  // Start periodic merge suggestion sweep (detects duplicate posts).
+  // Runs under a cross-instance lock — AI calls are expensive and duplicate
+  // merge suggestions are user-visible, so only one replica per tick.
+  // Runs once at startup (after a short delay) then every 30 minutes.
+  Promise.all([
+    import('./domains/merge-suggestions/merge-check.service'),
+    import('@/lib/server/sweep-lock'),
+  ])
+    .then(([{ sweepMergeSuggestions }, { withSweepLock }]) => {
+      const ONE_HOUR = 60 * 60 * 1000
       setTimeout(() => {
-        sweepMergeSuggestions().catch((err) =>
-          console.error('[Startup] Initial merge suggestion sweep failed:', err)
+        void withSweepLock('merge_sweep', ONE_HOUR, () =>
+          sweepMergeSuggestions().catch((err) =>
+            console.error('[Startup] Initial merge suggestion sweep failed:', err)
+          )
         )
       }, 15_000) // 15s delay (stagger after summary's 5s)
       setInterval(
         () => {
-          sweepMergeSuggestions().catch((err) =>
-            console.error('[Startup] Merge suggestion sweep failed:', err)
+          void withSweepLock('merge_sweep', ONE_HOUR, () =>
+            sweepMergeSuggestions().catch((err) =>
+              console.error('[Startup] Merge suggestion sweep failed:', err)
+            )
           )
         },
         30 * 60 * 1000
