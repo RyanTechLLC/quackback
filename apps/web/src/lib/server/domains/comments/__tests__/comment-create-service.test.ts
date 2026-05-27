@@ -102,7 +102,11 @@ vi.mock('@/lib/server/domains/subscriptions/subscription.service', () => ({
 }))
 vi.mock('@/lib/server/events/dispatch', () => ({
   dispatchCommentCreated: vi.fn(),
+  dispatchPostStatusChanged: vi.fn(),
   buildEventActor: vi.fn(() => ({})),
+}))
+vi.mock('@/lib/server/audit/log', () => ({
+  recordAuditEvent: vi.fn(),
 }))
 
 // A minimal team actor sufficient for all three tests (public board, published post)
@@ -156,5 +160,124 @@ describe('createComment isTeamMember derivation', () => {
       { skipDispatch: true }
     )
     expect(insertedComments[0]).toMatchObject({ isTeamMember: false })
+  })
+})
+
+// Helper: stub the post fixture so `board.access.approval.comments` matches
+// the test's intent. The default mock returns approval.comments=false.
+async function mockPostWithApproval(approvalComments: boolean) {
+  const { db } = await import('@/lib/server/db')
+  vi.mocked(db.query.posts.findFirst).mockResolvedValueOnce({
+    id: 'post_p',
+    title: 'P',
+    boardId: 'board_b',
+    statusId: 'status_open',
+    isCommentsLocked: false,
+    moderationState: 'published',
+    principalId: null,
+    board: {
+      id: 'board_b',
+      slug: 'b',
+      audience: { kind: 'public' },
+      access: {
+        view: 'anonymous',
+        comment: 'anonymous',
+        submit: 'anonymous',
+        segmentIds: [],
+        approval: { posts: false, comments: approvalComments },
+      },
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal fixture
+  } as any)
+}
+
+describe('createComment — board.access.approval.comments holds for review', () => {
+  beforeEach(() => {
+    insertedComments.length = 0
+    vi.clearAllMocks()
+  })
+
+  it('inserts moderationState=pending when approval.comments=true and actor is non-team', async () => {
+    await mockPostWithApproval(true)
+    const { createComment } = await import('../comment.service')
+    await createComment(
+      { postId: 'post_p' as unknown as PostId, content: 'Hi' },
+      { principalId: 'principal_uv' as unknown as PrincipalId, role: 'user' },
+      portalActor,
+      { skipDispatch: true }
+    )
+    expect(insertedComments[0]).toMatchObject({ moderationState: 'pending' })
+  })
+
+  it('inserts moderationState=published when approval.comments=false', async () => {
+    await mockPostWithApproval(false)
+    const { createComment } = await import('../comment.service')
+    await createComment(
+      { postId: 'post_p' as unknown as PostId, content: 'Hi' },
+      { principalId: 'principal_uv' as unknown as PrincipalId, role: 'user' },
+      portalActor,
+      { skipDispatch: true }
+    )
+    expect(insertedComments[0]).toMatchObject({ moderationState: 'published' })
+  })
+
+  it('team comments are NEVER held even when approval.comments=true', async () => {
+    await mockPostWithApproval(true)
+    const { createComment } = await import('../comment.service')
+    await createComment(
+      { postId: 'post_p' as unknown as PostId, content: 'Hi' },
+      { principalId: 'principal_admin' as unknown as PrincipalId, role: 'admin' },
+      teamActor,
+      { skipDispatch: true }
+    )
+    expect(insertedComments[0]).toMatchObject({ moderationState: 'published' })
+  })
+
+  it('emits comment.moderation.held audit when a comment is held', async () => {
+    await mockPostWithApproval(true)
+    const { recordAuditEvent } = await import('@/lib/server/audit/log')
+    const { createComment } = await import('../comment.service')
+    await createComment(
+      { postId: 'post_p' as unknown as PostId, content: 'Hi' },
+      { principalId: 'principal_uv' as unknown as PrincipalId, role: 'user' },
+      portalActor,
+      { skipDispatch: true }
+    )
+    expect(vi.mocked(recordAuditEvent)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'comment.moderation.held',
+        target: expect.objectContaining({ type: 'comment' }),
+        after: expect.objectContaining({ moderationState: 'pending' }),
+      })
+    )
+  })
+
+  it('does NOT emit comment.moderation.held when the comment is published', async () => {
+    await mockPostWithApproval(false)
+    const { recordAuditEvent } = await import('@/lib/server/audit/log')
+    const { createComment } = await import('../comment.service')
+    await createComment(
+      { postId: 'post_p' as unknown as PostId, content: 'Hi' },
+      { principalId: 'principal_uv' as unknown as PrincipalId, role: 'user' },
+      portalActor,
+      { skipDispatch: true }
+    )
+    expect(vi.mocked(recordAuditEvent)).not.toHaveBeenCalled()
+  })
+
+  it('held comments do NOT dispatch comment.created (defer until approval)', async () => {
+    await mockPostWithApproval(true)
+    const { dispatchCommentCreated } = await import('@/lib/server/events/dispatch')
+    const { subscribeToPost } =
+      await import('@/lib/server/domains/subscriptions/subscription.service')
+    const { createComment } = await import('../comment.service')
+    await createComment(
+      { postId: 'post_p' as unknown as PostId, content: 'Hi' },
+      { principalId: 'principal_uv' as unknown as PrincipalId, role: 'user' },
+      portalActor
+      // intentionally no skipDispatch — verify the function itself gates dispatch
+    )
+    expect(vi.mocked(dispatchCommentCreated)).not.toHaveBeenCalled()
+    expect(vi.mocked(subscribeToPost)).not.toHaveBeenCalled()
   })
 })

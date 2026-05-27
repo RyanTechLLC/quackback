@@ -8,6 +8,7 @@ import {
   posts,
   postStatuses,
   type Comment,
+  type ModerationState,
 } from '@/lib/server/db'
 import { type CommentId, type PrincipalId, type StatusId, type UserId } from '@quackback/ids'
 import { NotFoundError, ValidationError, ForbiddenError } from '@/lib/shared/errors'
@@ -26,6 +27,7 @@ import type { TiptapContent } from '@/lib/shared/db-types'
 import type { CreateCommentInput, CreateCommentResult, UpdateCommentInput } from './comment.types'
 import { canCreateComment } from '@/lib/server/policy/posts'
 import type { Actor } from '@/lib/server/policy/types'
+import { recordAuditEvent } from '@/lib/server/audit/log'
 
 /**
  * Resolve the TipTap doc to store. UI clients send `contentJson` directly
@@ -57,7 +59,7 @@ export async function createComment(
     role: 'admin' | 'member' | 'user'
   },
   actor: Actor,
-  options?: { skipDispatch?: boolean }
+  options?: { skipDispatch?: boolean; headers?: Headers }
 ): Promise<CreateCommentResult> {
   console.log(
     `[domain:comments] createComment: postId=${input.postId}, parentId=${input.parentId ?? 'none'}`
@@ -85,6 +87,13 @@ export async function createComment(
   if (!decision.allowed) {
     throw new ForbiddenError('FORBIDDEN', decision.reason)
   }
+  // canCreateComment.requiresApproval is true when the actor is non-team and
+  // the board has `approval.comments=true`. Held comments land with
+  // moderationState='pending' so they don't appear publicly until a
+  // moderator approves them via approveCommentFn.
+  const initialModerationState: ModerationState = decision.requiresApproval
+    ? 'pending'
+    : 'published'
 
   // Validate parent comment exists if specified
   let parentIsPrivate = false
@@ -169,6 +178,7 @@ export async function createComment(
           principalId: author.principalId,
           isTeamMember: authorIsTeamMember,
           isPrivate,
+          moderationState: initialModerationState,
           statusChangeFromId: prevStatus?.id ?? null,
           statusChangeToId: newStatus.id,
           ...(input.createdAt && { createdAt: input.createdAt }),
@@ -201,6 +211,7 @@ export async function createComment(
           principalId: author.principalId,
           isTeamMember: authorIsTeamMember,
           isPrivate,
+          moderationState: initialModerationState,
           ...(input.createdAt && { createdAt: input.createdAt }),
         })
         .returning()
@@ -219,7 +230,28 @@ export async function createComment(
     comment = result
   }
 
-  if (!options?.skipDispatch) {
+  if (initialModerationState === 'pending') {
+    // Record audit trail for held comments. Mirrors the post.moderation.held
+    // pattern in post.service.ts so moderators have a uniform timeline.
+    await recordAuditEvent({
+      event: 'comment.moderation.held',
+      actor: {
+        userId: author.userId,
+        email: author.email,
+        role: actor.role,
+        type: actor.principalType,
+      },
+      headers: options?.headers,
+      target: { type: 'comment', id: comment.id },
+      after: { moderationState: 'pending' },
+      metadata: { postId: post.id, principalType: actor.principalType },
+    })
+  }
+
+  // External dispatch (webhooks, Slack, @-mention emails) is deferred until
+  // the comment is visible. Held comments fire dispatch only on approval
+  // via approveCommentFn — mirroring the post-moderation flow.
+  if (!options?.skipDispatch && initialModerationState === 'published') {
     // Auto-subscribe commenter to the post
     if (author.principalId) {
       await subscribeToPost(author.principalId, input.postId, 'comment')
