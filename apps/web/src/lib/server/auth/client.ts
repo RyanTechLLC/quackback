@@ -121,10 +121,27 @@ export const authClient = createAuthClient({
 })
 
 /**
- * Sign out the current user
- * Note: Call router.invalidate() after signOut to update session
+ * Sign out the current user.
+ *
+ * Wrapped to also set the silent-SSO suppression flag so a user who
+ * just signed out doesn't get immediately re-signed-in by the
+ * `useSilentSso` hook on the very next page load. The flag lives in
+ * sessionStorage and is naturally cleared when the tab closes.
+ *
+ * Note: Call router.invalidate() after signOut to update session.
  */
-export const signOut = authClient.signOut
+export const signOut: typeof authClient.signOut = (...args) => {
+  if (typeof window !== 'undefined') {
+    try {
+      window.sessionStorage.setItem('quackback.sso.suppressed', '1')
+      window.sessionStorage.removeItem('quackback.sso.attempted')
+    } catch {
+      /* sessionStorage disabled — silent SSO has its own in-memory
+         guard within a single load so the worst case is one bounce. */
+    }
+  }
+  return authClient.signOut(...args)
+}
 
 /**
  * Check if the browser has an active session cookie.

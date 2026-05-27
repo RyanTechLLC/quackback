@@ -4,6 +4,7 @@ import { useRouteContext } from '@tanstack/react-router'
 import { settingsQueries } from '@/lib/client/queries/settings'
 import { PortalAuthForm } from '@/components/auth/portal-auth-form'
 import { PortalAuthShell } from '@/components/auth/portal-auth-shell'
+import { SilentSsoMount } from '@/components/auth/silent-sso-mount'
 import { DEFAULT_PORTAL_CONFIG } from '@/lib/shared/types/settings'
 
 /**
@@ -35,32 +36,35 @@ function LoginPage() {
   const workspaceName = ctx.settings?.brandingData?.name
 
   return (
-    <PortalAuthShell
-      heading="Welcome back"
-      subheading={
-        workspaceName
-          ? `Sign in to keep voting and tracking what ${workspaceName} ships.`
-          : 'Sign in to vote and comment on feedback.'
-      }
-      footer={
-        <p className="text-center text-sm text-muted-foreground">
-          New here?{' '}
-          <Link
-            to="/auth/signup"
-            className="font-medium text-primary hover:underline underline-offset-4"
-          >
-            Create an account
-          </Link>
-        </p>
-      }
-    >
-      <PortalAuthForm
-        mode="login"
-        callbackUrl="/"
-        authConfig={authConfig}
-        customProviderNames={portalConfig.customProviderNames}
-        workspaceName={workspaceName}
-      />
-    </PortalAuthShell>
+    <>
+      <SilentSsoMount />
+      <PortalAuthShell
+        heading="Welcome back"
+        subheading={
+          workspaceName
+            ? `Sign in to keep voting and tracking what ${workspaceName} ships.`
+            : 'Sign in to vote and comment on feedback.'
+        }
+        footer={
+          <p className="text-center text-sm text-muted-foreground">
+            New here?{' '}
+            <Link
+              to="/auth/signup"
+              className="font-medium text-primary hover:underline underline-offset-4"
+            >
+              Create an account
+            </Link>
+          </p>
+        }
+      >
+        <PortalAuthForm
+          mode="login"
+          callbackUrl="/"
+          authConfig={authConfig}
+          customProviderNames={portalConfig.customProviderNames}
+          workspaceName={workspaceName}
+        />
+      </PortalAuthShell>
+    </>
   )
 }

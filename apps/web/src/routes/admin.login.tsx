@@ -2,6 +2,7 @@ import { createFileRoute, Link, redirect } from '@tanstack/react-router'
 import { z } from 'zod'
 import { TeamLoginForm } from '@/components/auth/team-login-form'
 import { AdminAuthShell } from '@/components/auth/admin-auth-shell'
+import { SilentSsoMount } from '@/components/auth/silent-sso-mount'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import { isSafeCallbackUrl } from '@/lib/shared/routing'
@@ -97,6 +98,7 @@ function AdminLoginPage() {
 
   return (
     <AdminAuthShell heading="Sign in to your workspace">
+      <SilentSsoMount />
       {errorMessage && (
         <Alert variant="destructive">
           <ExclamationCircleIcon className="h-4 w-4" />

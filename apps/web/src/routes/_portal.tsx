@@ -4,6 +4,7 @@ import { fetchUserAvatar } from '@/lib/server/functions/portal'
 import { PortalHeader } from '@/components/public/portal-header'
 import { AuthPopoverProvider } from '@/components/auth/auth-popover-context'
 import { AuthDialog } from '@/components/auth/auth-dialog'
+import { SilentSsoMount } from '@/components/auth/silent-sso-mount'
 import { DEFAULT_PORTAL_CONFIG } from '@/lib/shared/types/settings'
 import { generateThemeCSS, getGoogleFontsUrl } from '@/lib/shared/theme'
 import { resolveLocale } from '@/lib/shared/i18n'
@@ -126,6 +127,7 @@ function PortalLayout() {
   return (
     <PortalIntlProvider locale={locale}>
       <AuthPopoverProvider>
+        <SilentSsoMount />
         <div className="min-h-screen bg-background flex flex-col">
           {googleFontsUrl && <link rel="stylesheet" href={googleFontsUrl} />}
           {themeStyles && <style dangerouslySetInnerHTML={{ __html: themeStyles }} />}
