@@ -81,7 +81,7 @@ export const posts = pgTable(
     isCommentsLocked: boolean('is_comments_locked').default(false).notNull(),
     // Moderation state for imported/pending content
     moderationState: text('moderation_state', {
-      enum: ['published', 'pending', 'spam', 'archived', 'closed', 'deleted'],
+      enum: MODERATION_STATES,
     })
       .default('published')
       .notNull(),
