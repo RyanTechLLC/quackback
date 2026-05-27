@@ -34,6 +34,7 @@ import { isTeamMember } from '@/lib/shared/roles'
 import { ForbiddenError, NotFoundError, ConflictError } from '@/lib/shared/errors'
 import { getPortalConfig } from '@/lib/server/domains/settings/settings.service'
 import { announcePublishedPost } from '@/lib/server/domains/posts/post.announce'
+import { announcePublishedComment } from '@/lib/server/domains/comments/comment.announce'
 
 const ApproveInput = z.object({ postId: z.string() })
 const RejectInput = z.object({ postId: z.string(), reason: z.string().max(500).optional() })
@@ -208,6 +209,14 @@ export const approveCommentFn = createServerFn({ method: 'POST' })
       before: { moderationState: before.moderationState },
       after: { moderationState: 'published' },
     })
+    // Dispatch deferred external notifications. Mirrors approvePostFn: the
+    // comment is already published and audited, so swallow failures rather
+    // than surface a 500 to the moderator with no retry path.
+    try {
+      await announcePublishedComment(data.commentId as never)
+    } catch (err) {
+      console.error('[moderation] announcePublishedComment failed:', err)
+    }
     return { ok: true }
   })
 

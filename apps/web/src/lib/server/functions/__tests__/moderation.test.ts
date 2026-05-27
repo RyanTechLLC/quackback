@@ -257,6 +257,11 @@ vi.mock('@/lib/server/domains/posts/post.announce', () => ({
   announcePublishedPost: (...args: unknown[]) => mockAnnouncePublishedPost(...args),
 }))
 
+const mockAnnouncePublishedComment = vi.fn().mockResolvedValue(undefined)
+vi.mock('@/lib/server/domains/comments/comment.announce', () => ({
+  announcePublishedComment: (...args: unknown[]) => mockAnnouncePublishedComment(...args),
+}))
+
 const mockGetPortalConfig = hoisted.mockGetPortalConfig
 
 // Production code passes the ColRef containers (`posts`/`comments`/`boards`)
@@ -495,6 +500,8 @@ beforeEach(() => {
   mockGetPortalConfig.mockReset()
   mockAnnouncePublishedPost.mockReset()
   mockAnnouncePublishedPost.mockResolvedValue(undefined)
+  mockAnnouncePublishedComment.mockReset()
+  mockAnnouncePublishedComment.mockResolvedValue(undefined)
 })
 
 // ----------------------------------------------------------------------
@@ -797,6 +804,36 @@ describe('mutation TOCTOU guards — parent-deletedAt in the UPDATE WHERE', () =
     mockRequireAuth.mockResolvedValue(AUTH_ADMIN)
     await approveComment()({ data: { commentId: 'c1' } })
     expect(dbState.comments[0].moderationState).toBe('published')
+  })
+
+  it('approveCommentFn calls announcePublishedComment with the commentId on success', async () => {
+    // The deferred dispatch (webhooks) must fire after approve, mirroring
+    // approvePostFn — held comments skip dispatch at create time, so the
+    // approval is the only chance to emit comment.created.
+    dbState.boards = [{ id: 'b1', name: 'Active', deletedAt: null }]
+    dbState.posts = [{ ...POST_DEFAULTS, id: 'p1', moderationState: 'published', deletedAt: null }]
+    dbState.comments = [
+      { ...COMMENT_DEFAULTS, id: 'c1', moderationState: 'pending', deletedAt: null },
+    ]
+    mockRequireAuth.mockResolvedValue(AUTH_ADMIN)
+    await approveComment()({ data: { commentId: 'c1' } })
+    expect(mockAnnouncePublishedComment).toHaveBeenCalledOnce()
+    expect(mockAnnouncePublishedComment).toHaveBeenCalledWith('c1')
+  })
+
+  it('approveCommentFn does NOT call announcePublishedComment when approve fails', async () => {
+    // Already-published comments fail the guarded UPDATE and must not
+    // emit a duplicate comment.created event.
+    dbState.boards = [{ id: 'b1', name: 'Active', deletedAt: null }]
+    dbState.posts = [{ ...POST_DEFAULTS, id: 'p1', moderationState: 'published', deletedAt: null }]
+    dbState.comments = [
+      { ...COMMENT_DEFAULTS, id: 'c1', moderationState: 'published', deletedAt: null },
+    ]
+    mockRequireAuth.mockResolvedValue(AUTH_ADMIN)
+    await expect(approveComment()({ data: { commentId: 'c1' } })).rejects.toBeInstanceOf(
+      ConflictError
+    )
+    expect(mockAnnouncePublishedComment).not.toHaveBeenCalled()
   })
 })
 
