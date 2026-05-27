@@ -540,6 +540,13 @@
       "when": 1779235200000,
       "tag": "0076_user_email_lower_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1779321600000,
+      "tag": "0077_sweep_lock",
+      "breakpoints": true
     }
   ]
 }

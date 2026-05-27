@@ -278,19 +278,22 @@
   }
 }
 
-/* Interactive elements cursor - prevent flickering */
-a,
+/* Interactive elements — pointer cursor for native controls.
+   Kept narrow on purpose: no [tabindex] or [data-radix-collection-item]
+   (those match whole card containers, not just clickable elements).
+   <a> is omitted — user-agent already gives it cursor: pointer. */
 button,
 [role="button"],
 input[type="submit"],
 input[type="button"],
 input[type="reset"],
-label[for],
-select,
-[tabindex]:not([tabindex="-1"]):not(.ProseMirror),
-[data-radix-collection-item],
+select {
+  cursor: pointer;
+}
+
+/* Utility class for manual cursor overrides */
 .cursor-pointer {
-  cursor: pointer !important;
+  cursor: pointer;
 }
 
 /* Ensure SVGs in buttons don't cause cursor flickering */

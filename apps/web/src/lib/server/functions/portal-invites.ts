@@ -20,6 +20,7 @@ import { actorFromAuth, recordAuditEvent } from '@/lib/server/audit/log'
 import { getBaseUrl } from '@/lib/server/config'
 import { sendPortalInviteEmail } from '@quackback/email'
 import { getSession } from '@/lib/server/auth/session'
+import { safeEmail } from '@/lib/shared/utils/string'
 
 /** Portal invite lifetime — 14 days. */
 const PORTAL_INVITE_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000
@@ -160,7 +161,9 @@ async function sendOnePortalInvite({
     },
   })
 
-  console.log(`[fn:portal-invites] sendOnePortalInvite: sent id=${inviteId} email=${email}`)
+  console.log(
+    `[fn:portal-invites] sendOnePortalInvite: sent id=${inviteId} email=${safeEmail(email)}`
+  )
   return inviteId
 }
 
@@ -211,7 +214,7 @@ export const sendPortalInviteFn = createServerFn({ method: 'POST' })
         results.push({ email, ok: true, inviteId })
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Unknown error'
-        console.warn(`[fn:portal-invites] bulk send failed for ${email}:`, errorMsg)
+        console.warn(`[fn:portal-invites] bulk send failed for ${safeEmail(email)}:`, errorMsg)
         results.push({ email, ok: false, error: errorMsg })
       }
     }
@@ -535,7 +538,7 @@ export const acceptPortalInviteFn = createServerFn({ method: 'POST' })
     // of whether the invite has already been accepted.
     if (inv.email.toLowerCase() !== sessionEmail) {
       console.warn(
-        `[fn:portal-invites] acceptPortalInviteFn: email mismatch invite=${inv.email} session=${sessionEmail}`
+        `[fn:portal-invites] acceptPortalInviteFn: email mismatch invite=${safeEmail(inv.email)} session=${safeEmail(sessionEmail)}`
       )
       return { status: 'mismatch' }
     }
@@ -550,7 +553,7 @@ export const acceptPortalInviteFn = createServerFn({ method: 'POST' })
     //       owner clicks the link.
     if (!session.user.emailVerified) {
       console.warn(
-        `[fn:portal-invites] acceptPortalInviteFn: email not verified session=${sessionEmail}`
+        `[fn:portal-invites] acceptPortalInviteFn: email not verified session=${safeEmail(sessionEmail)}`
       )
       return { status: 'email_not_verified' }
     }

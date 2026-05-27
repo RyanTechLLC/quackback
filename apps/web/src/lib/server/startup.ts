@@ -151,24 +151,29 @@ export function logStartupBanner(): void {
     })
     .catch((err) => console.error('[Startup] Failed to init feedback maintenance:', err))
 
-  // Audit-log retention sweep. Once a day deletes rows older than
-  // the configured retention window (default 365d, SOC2-aligned).
-  // First sweep runs 30s after boot so it doesn't compete with
-  // migrations + worker init on the startup hot path.
-  //
-  // Also sweeps expired portal invitations: finds pending invites past
-  // their expiresAt, emits portal.invite.expired per invite, and bulk-
-  // updates status='expired'. Runs in the same daily timer so both
-  // maintenance tasks share a single scheduler.
-  Promise.all([import('@/lib/server/audit/log'), import('@/lib/server/audit/invite-sweep')])
-    .then(([{ pruneAuditLog }, { sweepExpiredPortalInvites }]) => {
+  // Audit-log retention sweep + expired portal/team invite sweep.
+  // Daily maintenance runs under a cross-instance lock so only one
+  // replica executes per tick in multi-instance deployments.
+  Promise.all([
+    import('@/lib/server/audit/log'),
+    import('@/lib/server/audit/invite-sweep'),
+    import('@/lib/server/sweep-lock'),
+  ])
+    .then(([{ pruneAuditLog }, { sweepExpiredPortalInvites }, { withSweepLock }]) => {
       const runDailyAuditMaintenance = async () => {
-        await pruneAuditLog().catch((err) =>
-          console.error('[Startup] Audit-log prune failed:', err)
-        )
-        await sweepExpiredPortalInvites().catch((err) =>
-          console.error('[Startup] Invite sweep failed:', err)
-        )
+        // TTL = 1 hour — each sweeper takes < 1s. Extending generously
+        // so a slow DB or large table doesn't cause premature expiry.
+        const ONE_HOUR = 60 * 60 * 1000
+        await withSweepLock('audit_prune', ONE_HOUR, async () => {
+          await pruneAuditLog().catch((err) =>
+            console.error('[Startup] Audit-log prune failed:', err)
+          )
+        })
+        await withSweepLock('invite_sweep', ONE_HOUR, async () => {
+          await sweepExpiredPortalInvites().catch((err) =>
+            console.error('[Startup] Invite sweep failed:', err)
+          )
+        })
       }
       setTimeout(() => {
         void runDailyAuditMaintenance()
