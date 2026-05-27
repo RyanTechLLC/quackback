@@ -17,6 +17,8 @@ import {
 import {
   type Board,
   type BoardAudience,
+  type BoardAccess,
+  type AccessTier,
   DEFAULT_BOARD_AUDIENCE,
   DEFAULT_BOARD_ACCESS,
 } from '@/lib/shared/db-types'
@@ -24,6 +26,36 @@ import type { BoardId } from '@quackback/ids'
 import { boardKeys } from '@/lib/client/hooks/use-boards-query'
 import { adminQueries } from '@/lib/client/queries/admin'
 import { slugify } from '@/lib/shared/utils'
+
+// ============================================================================
+// Local helpers
+// ============================================================================
+
+/**
+ * Local copy of the server's audienceToAccess derivation. Identical mapping;
+ * inlined to avoid pulling server-only modules into the client bundle. Keeps
+ * optimistic updates in sync with the server's dual-write so any UI that
+ * reads `board.access` doesn't show stale tiers for the ~1s round-trip.
+ */
+function clientAudienceToAccess(audience: BoardAudience): BoardAccess {
+  const tier: AccessTier =
+    audience.kind === 'public'
+      ? 'anonymous'
+      : audience.kind === 'authenticated'
+        ? 'authenticated'
+        : audience.kind === 'team'
+          ? 'team'
+          : audience.kind === 'segments'
+            ? 'segments'
+            : 'anonymous'
+  return {
+    ...DEFAULT_BOARD_ACCESS,
+    view: tier,
+    comment: tier,
+    submit: tier,
+    segmentIds: audience.kind === 'segments' ? audience.segmentIds : [],
+  }
+}
 
 // ============================================================================
 // Mutation Hooks
@@ -153,7 +185,10 @@ export function useUpdateBoardAccess() {
             ? board
             : {
                 ...board,
-                ...(input.audience !== undefined && { audience: input.audience }),
+                ...(input.audience !== undefined && {
+                  audience: input.audience,
+                  access: clientAudienceToAccess(input.audience),
+                }),
                 updatedAt: new Date(),
               }
         )
@@ -162,7 +197,10 @@ export function useUpdateBoardAccess() {
       if (previousDetail) {
         queryClient.setQueryData<Board>(boardKeys.detail(input.boardId), {
           ...previousDetail,
-          ...(input.audience !== undefined && { audience: input.audience }),
+          ...(input.audience !== undefined && {
+            audience: input.audience,
+            access: clientAudienceToAccess(input.audience),
+          }),
           updatedAt: new Date(),
         })
       }
