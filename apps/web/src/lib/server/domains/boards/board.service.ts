@@ -26,7 +26,12 @@ import type { BoardId, PostId } from '@quackback/ids'
 import { NotFoundError, ValidationError, ConflictError } from '@/lib/shared/errors'
 import type { CreateBoardInput, UpdateBoardInput, BoardWithDetails } from './board.types'
 import { slugify } from '@/lib/shared/utils'
-import { DEFAULT_BOARD_ACCESS, type BoardAccess, type BoardAudience } from '@/lib/server/db'
+import {
+  DEFAULT_BOARD_ACCESS,
+  type AccessTier,
+  type BoardAccess,
+  type BoardAudience,
+} from '@/lib/server/db'
 
 /**
  * Derive a BoardAccess from a legacy BoardAudience. Same semantics as the
@@ -35,14 +40,26 @@ import { DEFAULT_BOARD_ACCESS, type BoardAccess, type BoardAudience } from '@/li
  * when creating a new board so audience and access stay consistent.
  */
 export function audienceToAccess(audience: BoardAudience): BoardAccess {
-  const tier =
-    audience.kind === 'public'
-      ? 'anonymous'
-      : audience.kind === 'authenticated'
-        ? 'authenticated'
-        : audience.kind === 'team'
-          ? 'team'
-          : 'segments'
+  // Explicit kind→tier mapping with an 'anonymous' default. The default
+  // mirrors the ELSE clause in migration 0079 and keeps the function safe if
+  // the BoardAudience union is ever widened without updating this map.
+  let tier: AccessTier
+  switch (audience.kind) {
+    case 'public':
+      tier = 'anonymous'
+      break
+    case 'authenticated':
+      tier = 'authenticated'
+      break
+    case 'team':
+      tier = 'team'
+      break
+    case 'segments':
+      tier = 'segments'
+      break
+    default:
+      tier = 'anonymous'
+  }
   const segmentIds = audience.kind === 'segments' ? audience.segmentIds : []
   return {
     ...DEFAULT_BOARD_ACCESS,
