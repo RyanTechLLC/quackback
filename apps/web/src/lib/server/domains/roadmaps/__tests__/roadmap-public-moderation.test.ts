@@ -99,9 +99,15 @@ describe('getPublicRoadmapPosts — moderation state filter', () => {
     // roadmap UI so they can act on them — the moderation filter is
     // specifically a public-view gate.
     mockSelect.mockReset()
+    // Count query has two innerJoins (postRoadmaps→posts→boards) now that
+    // soft-deleted boards are filtered out — mirror the public-side shape.
+    const countChain = { where: () => Promise.resolve([{ count: 0 }]) }
     mockSelect.mockReturnValueOnce(chainReturning([])).mockReturnValueOnce({
       from: () => ({
-        innerJoin: () => ({ where: () => Promise.resolve([{ count: 0 }]) }),
+        innerJoin: () => ({
+          innerJoin: () => countChain,
+          where: () => Promise.resolve([{ count: 0 }]),
+        }),
       }),
     })
     mockEq.mockClear()

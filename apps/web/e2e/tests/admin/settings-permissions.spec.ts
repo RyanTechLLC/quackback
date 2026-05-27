@@ -1,20 +1,20 @@
 import { test, expect } from '@playwright/test'
 
-test.describe('Admin Permissions Settings', () => {
+test.describe('Admin Moderation Settings', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/admin/settings/permissions')
+    await page.goto('/admin/settings/moderation')
     await page.waitForLoadState('networkidle')
   })
 
-  test('page loads and shows permissions heading', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: 'Permissions' })).toBeVisible({ timeout: 10000 })
+  test('page loads and shows moderation heading', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: 'Moderation' })).toBeVisible({ timeout: 10000 })
     await expect(
-      page.getByText('Control who can access your portal and what they can do.')
+      page.getByText('Anonymous access and approval rules for incoming posts.')
     ).toBeVisible({ timeout: 10000 })
   })
 
-  test('shows Permissions card with anonymous toggles', async ({ page }) => {
-    await expect(page.getByText('Permissions')).toBeVisible({ timeout: 10000 })
+  test('shows Anonymous access card with anonymous toggles', async ({ page }) => {
+    await expect(page.getByText('Anonymous access')).toBeVisible({ timeout: 10000 })
     await expect(
       page.getByText('Control what visitors without an account can do on your portal.')
     ).toBeVisible()
@@ -28,8 +28,8 @@ test.describe('Admin Permissions Settings', () => {
     await expect(page.locator('#anon-voting')).toBeVisible()
   })
 
-  test('shows Moderation card', async ({ page }) => {
-    await expect(page.getByText('Moderation')).toBeVisible({ timeout: 10000 })
+  test('shows Approval rules card', async ({ page }) => {
+    await expect(page.getByText('Approval rules')).toBeVisible({ timeout: 10000 })
     await expect(
       page.getByText('Posts from the selected groups wait for review before publishing.')
     ).toBeVisible()
@@ -42,8 +42,8 @@ test.describe('Admin Permissions Settings', () => {
   })
 
   test('page shows exactly two settings cards', async ({ page }) => {
-    await expect(page.getByText('Permissions')).toBeVisible({ timeout: 10000 })
-    await expect(page.getByText('Moderation')).toBeVisible()
+    await expect(page.getByText('Anonymous access')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText('Approval rules')).toBeVisible()
     await expect(page.getByText('Post content')).not.toBeVisible()
   })
 

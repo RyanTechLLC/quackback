@@ -29,10 +29,15 @@ async function validatePrincipals(
   // Dedupe so a duplicate id in the body doesn't double-add or
   // double-remove (REST callers occasionally include dupes when paging).
   const unique = Array.from(new Set(requested))
+  // Only human `type='user'` principals are eligible for segment
+  // membership: anonymous visitors have no stable identity for SSO
+  // reconcile, and service principals (API keys, integrations) would
+  // pollute board-access checks if they slipped into userSegments.
+  // Filter here so the validator can't be tricked into adding either.
   const rows = await db
     .select({ id: principal.id })
     .from(principal)
-    .where(inArray(principal.id, unique as PrincipalId[]))
+    .where(and(inArray(principal.id, unique as PrincipalId[]), eq(principal.type, 'user')))
   const found = new Set(rows.map((r) => String(r.id)))
   const valid: PrincipalId[] = []
   const missing: string[] = []

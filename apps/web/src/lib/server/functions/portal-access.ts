@@ -4,16 +4,6 @@
  */
 import { z } from 'zod'
 import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
-import { getRequestHeaders } from '@tanstack/react-start/server'
-import { requireAuth } from './auth-helpers'
-import { getPortalConfig, updatePortalConfig } from '@/lib/server/domains/settings/settings.service'
-import { getWidgetConfig } from '@/lib/server/domains/settings/settings.widget'
-import { actorFromAuth, recordAuditEvent } from '@/lib/server/audit/log'
-import { NotFoundError } from '@/lib/shared/errors'
-import {
-  evaluatePortalAccess,
-  type PortalAccessResult,
-} from '@/lib/server/domains/settings/portal-access'
 import type { UserId, PrincipalId, SegmentId } from '@quackback/ids'
 
 // ---------------------------------------------------------------------------
@@ -69,6 +59,7 @@ export const resolvePortalAccessForRequest = createServerOnlyFn(
   async (): Promise<PortalAccessDecision> => {
     const { auth } = await import('@/lib/server/auth/index')
     const { db, principal, eq } = await import('@/lib/server/db')
+    const { getRequestHeaders } = await import('@tanstack/react-start/server')
     const headers = getRequestHeaders()
 
     // Resolve the caller's session — no client-supplied identity accepted.
@@ -167,8 +158,14 @@ export const resolvePortalAccessForRequest = createServerOnlyFn(
     //     OPEN to a public portal so it keeps working.
     //   - Anything else (DB error, JSON parse, transient infra): fail CLOSED.
     //     A private portal must never silently become public on transient errors.
-    let result: PortalAccessResult
+    let result: { granted: boolean; reason: string }
     try {
+      const [{ getPortalConfig }, { getWidgetConfig }, { evaluatePortalAccess }] =
+        await Promise.all([
+          import('@/lib/server/domains/settings/settings.service'),
+          import('@/lib/server/domains/settings/settings.widget'),
+          import('@/lib/server/domains/settings/portal-access'),
+        ])
       const [portalConfig, widgetConfig] = await Promise.all([
         getPortalConfig(),
         getWidgetConfig().catch(() => null),
@@ -205,6 +202,7 @@ export const resolvePortalAccessForRequest = createServerOnlyFn(
         isInAllowedSegment,
       })
     } catch (err) {
+      const { NotFoundError } = await import('@/lib/shared/errors')
       if (err instanceof NotFoundError) {
         // No settings row — un-onboarded install, treat as public.
         return { granted: true, reason: 'public' }
@@ -259,6 +257,7 @@ const recordPortalAccessDeniedSchema = z.object({
 export const recordPortalAccessDeniedFn = createServerFn({ method: 'POST' })
   .inputValidator(recordPortalAccessDeniedSchema)
   .handler(async ({ data }) => {
+    const { getRequestHeaders } = await import('@tanstack/react-start/server')
     const { auth } = await import('@/lib/server/auth/index')
     const headers = getRequestHeaders()
     let session: Awaited<ReturnType<typeof auth.api.getSession>> | null = null
@@ -271,6 +270,7 @@ export const recordPortalAccessDeniedFn = createServerFn({ method: 'POST' })
       // No authenticated session — nothing to audit (gate-side already filters).
       return
     }
+    const { recordAuditEvent } = await import('@/lib/server/audit/log')
     await recordAuditEvent({
       event: 'portal.access.denied',
       outcome: 'failure',
@@ -345,6 +345,12 @@ export const updatePortalVisibilitySchema = z.object({
 export const updatePortalAccessFn = createServerFn({ method: 'POST' })
   .inputValidator(updatePortalVisibilitySchema.parse)
   .handler(async ({ data }) => {
+    const [{ requireAuth }, { getRequestHeaders }, { actorFromAuth, recordAuditEvent }] =
+      await Promise.all([
+        import('./auth-helpers'),
+        import('@tanstack/react-start/server'),
+        import('@/lib/server/audit/log'),
+      ])
     const auth = await requireAuth({ roles: ['admin'] })
     console.log(
       `[fn:portal-access] updatePortalAccessFn: visibility=${data.visibility}, domainCount=${(data.allowedDomains ?? []).length}, widgetSignIn=${data.widgetSignIn}, segmentCount=${(data.allowedSegmentIds ?? []).length}`
@@ -353,6 +359,8 @@ export const updatePortalAccessFn = createServerFn({ method: 'POST' })
     const headers = getRequestHeaders()
     const actor = actorFromAuth(auth)
 
+    const { getPortalConfig, updatePortalConfig } =
+      await import('@/lib/server/domains/settings/settings.service')
     const before = await getPortalConfig()
 
     const normalizedDomains =

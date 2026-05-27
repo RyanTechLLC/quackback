@@ -179,9 +179,16 @@ const consumeWidgetHandoffFn = createServerFn({ method: 'POST' })
     // header until after provenance closes that session-poisoning vector.
     const setCookieValues = verifyResponse.headers.getSetCookie?.() ?? []
     if (setCookieValues.length === 0) {
-      // Fallback for environments where getSetCookie isn't available
-      const single = verifyResponse.headers.get('set-cookie')
-      if (single) setCookieValues.push(single)
+      // Fallback for environments without getSetCookie. Iterate the Headers
+      // entries (which yield one entry per Set-Cookie) instead of
+      // .get('set-cookie'), which folds multiple Set-Cookie values into a
+      // single comma-separated string — browsers parse that as ONE
+      // malformed cookie, breaking session installation.
+      for (const [name, value] of verifyResponse.headers) {
+        if (name.toLowerCase() === 'set-cookie') {
+          setCookieValues.push(value)
+        }
+      }
     }
 
     // Parse the session info from the BA response body.

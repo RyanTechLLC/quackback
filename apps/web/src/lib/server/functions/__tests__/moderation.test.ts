@@ -35,6 +35,14 @@ vi.mock('@tanstack/react-start', () => ({
   },
 }))
 
+// Stub the server-runtime header reader. moderation.ts calls
+// getRequestHeaders() to populate audit observability columns; outside
+// the StartEvent AsyncLocalStorage scope it throws, so return an empty
+// Headers in tests.
+vi.mock('@tanstack/react-start/server', () => ({
+  getRequestHeaders: () => new Headers(),
+}))
+
 // ----------------------------------------------------------------------
 // Mocks
 // ----------------------------------------------------------------------

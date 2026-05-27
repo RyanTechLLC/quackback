@@ -69,8 +69,12 @@ function rowToSegment(row: {
 /**
  * Build a unique segment slug from a display name. Probes the DB for
  * collisions and appends a numeric suffix until a free slug is found.
+ *
+ * `excludeId` lets `updateSegment` regenerate a slug without colliding
+ * with the segment it's currently renaming (the row's own slug would
+ * otherwise count as a collision and force a `-2` suffix).
  */
-async function uniqueSegmentSlug(name: string): Promise<string> {
+async function uniqueSegmentSlug(name: string, excludeId?: SegmentId): Promise<string> {
   const base = slugify(name) || 'segment'
   let candidate = base
   let counter = 2
@@ -79,7 +83,7 @@ async function uniqueSegmentSlug(name: string): Promise<string> {
       where: and(eq(segments.slug, candidate), isNull(segments.deletedAt)),
       columns: { id: true },
     })
-    if (!collision) return candidate
+    if (!collision || (excludeId && collision.id === excludeId)) return candidate
     candidate = `${base}-${counter}`
     counter++
   }
@@ -187,7 +191,20 @@ export async function updateSegment(
   }
 
   const updates: Partial<typeof segments.$inferInsert> = {}
-  if (input.name !== undefined) updates.name = input.name.trim()
+  if (input.name !== undefined) {
+    const trimmed = input.name.trim()
+    updates.name = trimmed
+    // Regenerate the slug whenever the display name moves. Widget JWTs and
+    // REST callers address segments by slug, so leaving the slug pinned to
+    // the original name silently breaks every tooltip / integration that
+    // derived its slug from the current display name. uniqueSegmentSlug
+    // excludes the row being renamed so a no-op rename ("X" → "X") doesn't
+    // force a `-2` suffix.
+    const nextSlug = await uniqueSegmentSlug(trimmed, segmentId)
+    if (nextSlug !== existing.slug) {
+      updates.slug = nextSlug
+    }
+  }
   if (input.description !== undefined) updates.description = input.description
   if (input.color !== undefined) updates.color = input.color
   if (input.rules !== undefined) updates.rules = input.rules

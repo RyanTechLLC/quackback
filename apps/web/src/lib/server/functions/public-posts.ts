@@ -470,7 +470,8 @@ export const createPublicPostFn = createServerFn({ method: 'POST' })
           statusId: defaultStatus?.id,
           widgetMetadata: metadata,
         },
-        author
+        author,
+        { headers: getRequestHeaders() }
       )
 
       console.log(`[fn:public-posts] createPublicPostFn: id=${post.id}`)

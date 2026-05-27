@@ -94,7 +94,8 @@ export const Route = createFileRoute('/api/v1/apps/posts')({
               name: principalRecord?.user?.name,
               email: principalRecord?.user?.email ?? undefined,
               actor,
-            }
+            },
+            { headers: request.headers }
           )
 
           // If link info provided, link ticket to the newly created post

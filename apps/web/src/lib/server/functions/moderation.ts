@@ -12,6 +12,7 @@
  * on the Settings → Feedback → Moderation page.
  */
 import { createServerFn } from '@tanstack/react-start'
+import { getRequestHeaders } from '@tanstack/react-start/server'
 import { z } from 'zod'
 import { db, posts, boards, principal, eq, and, isNull, desc, sql } from '@/lib/server/db'
 import { requireAuth } from '@/lib/server/functions/auth-helpers'
@@ -73,6 +74,7 @@ export const approvePostFn = createServerFn({ method: 'POST' })
     await recordAuditEvent({
       event: 'post.moderation.approved',
       actor: actorFromAuth(auth),
+      headers: getRequestHeaders(),
       target: { type: 'post', id: data.postId },
       before: { moderationState: before.moderationState },
       after: { moderationState: 'published' },
@@ -80,7 +82,15 @@ export const approvePostFn = createServerFn({ method: 'POST' })
     // Dispatch deferred external notifications. The actor must be the post's
     // author — not the moderator — so announcePublishedPost loads author data
     // from the post row (which carries principalId, not the moderator's id).
-    await announcePublishedPost(data.postId as never)
+    //
+    // Swallow failures: the post is already published and audited; an error
+    // here would surface a 500 to the moderator and the retry path is blocked
+    // by the POST_NOT_PENDING guard above, permanently losing webhooks/mentions.
+    try {
+      await announcePublishedPost(data.postId as never)
+    } catch (err) {
+      console.error('[moderation] announcePublishedPost failed:', err)
+    }
     return { ok: true }
   })
 
@@ -111,6 +121,7 @@ export const rejectPostFn = createServerFn({ method: 'POST' })
     await recordAuditEvent({
       event: 'post.moderation.rejected',
       actor: actorFromAuth(auth),
+      headers: getRequestHeaders(),
       target: { type: 'post', id: data.postId },
       before: { moderationState: before.moderationState, deletedAt: null },
       after: { moderationState: before.moderationState, deletedAt },

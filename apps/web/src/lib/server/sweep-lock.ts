@@ -41,10 +41,27 @@ export async function withSweepLock(
       SET acquired_at = now(),
           expires_at = now() + make_interval(secs => ${ttlMs / 1000})
       WHERE sweep_lock.expires_at < now()
-    RETURNING name
+    RETURNING name, acquired_at
   `)
 
-  if (getExecuteRows(result).length === 0) return // Another instance owns this lock
+  const rows = getExecuteRows(result) as Array<{ acquired_at: Date | string }>
+  if (rows.length === 0) return // Another instance owns this lock
 
-  await fn()
+  const acquiredAt = rows[0]?.acquired_at
+
+  try {
+    await fn()
+  } finally {
+    // Release the lock so the next interval tick isn't blocked for the full
+    // TTL after a transient failure. Guard on acquired_at so we don't clobber
+    // a lock another instance took over after our TTL expired mid-fn.
+    try {
+      await db.execute(sql`
+        DELETE FROM sweep_lock
+        WHERE name = ${name} AND acquired_at = ${acquiredAt}
+      `)
+    } catch (err) {
+      console.error('[sweep-lock] release failed:', err)
+    }
+  }
 }

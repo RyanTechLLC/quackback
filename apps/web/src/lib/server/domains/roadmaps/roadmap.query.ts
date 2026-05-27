@@ -97,6 +97,10 @@ export async function getRoadmapPosts(
   const baseConditions: ReturnType<typeof eq>[] = [
     eq(postRoadmaps.roadmapId, roadmapId),
     isNull(posts.deletedAt),
+    // Hide posts whose board has been soft-deleted. boards is joined in
+    // both queries below so this column is in scope for the count query
+    // as well as the data query.
+    isNull(boards.deletedAt),
   ]
   if (statusId) {
     baseConditions.push(eq(posts.statusId, statusId))
@@ -131,6 +135,7 @@ export async function getRoadmapPosts(
       .select({ count: sql<number>`COUNT(*)` })
       .from(postRoadmaps)
       .innerJoin(posts, eq(postRoadmaps.postId, posts.id))
+      .innerJoin(boards, eq(posts.boardId, boards.id))
       .where(and(...conditions)),
   ])
 

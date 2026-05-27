@@ -38,13 +38,15 @@ beforeEach(() => {
 
 describe('withSweepLock', () => {
   it('calls fn when the lock is acquired (INSERT returns a row)', async () => {
-    mockExecuteRows = [{ name: 'invite_sweep' }]
+    mockExecuteRows = [{ name: 'invite_sweep', acquired_at: new Date() }]
     const fn = vi.fn()
 
     await withSweepLock('invite_sweep', 60_000, fn)
 
     expect(fn).toHaveBeenCalledOnce()
-    expect(mockExecute).toHaveBeenCalledOnce()
+    // Two executes: the INSERT to acquire, plus the DELETE in finally
+    // that releases the lock so the next interval tick isn't blocked.
+    expect(mockExecute).toHaveBeenCalledTimes(2)
   })
 
   it('skips fn when the lock is NOT acquired (zero rows returned)', async () => {
@@ -54,11 +56,12 @@ describe('withSweepLock', () => {
     await withSweepLock('invite_sweep', 60_000, fn)
 
     expect(fn).not.toHaveBeenCalled()
+    // Only the INSERT runs — no release path when we didn't acquire.
     expect(mockExecute).toHaveBeenCalledOnce()
   })
 
   it('passes the lock name into the INSERT', async () => {
-    mockExecuteRows = [{ name: 'audit_prune' }]
+    mockExecuteRows = [{ name: 'audit_prune', acquired_at: new Date() }]
     const fn = vi.fn()
 
     await withSweepLock('audit_prune', 120_000, fn)
@@ -69,7 +72,7 @@ describe('withSweepLock', () => {
   })
 
   it('converts ttlMs to seconds in the SQL interval', async () => {
-    mockExecuteRows = [{ name: 'audit_prune' }]
+    mockExecuteRows = [{ name: 'audit_prune', acquired_at: new Date() }]
     const fn = vi.fn()
 
     await withSweepLock('audit_prune', 90_000, fn)
@@ -79,13 +82,16 @@ describe('withSweepLock', () => {
     expect(sqlArg).toBeDefined()
   })
 
-  it('propagates errors from fn to the caller', async () => {
-    mockExecuteRows = [{ name: 'invite_sweep' }]
+  it('propagates errors from fn to the caller AND releases the lock', async () => {
+    mockExecuteRows = [{ name: 'invite_sweep', acquired_at: new Date() }]
     const fn = vi.fn().mockRejectedValue(new Error('sweep failed'))
 
     await expect(withSweepLock('invite_sweep', 60_000, fn)).rejects.toThrow('sweep failed')
 
     expect(fn).toHaveBeenCalledOnce()
+    // The finally-block DELETE must still fire so the next interval tick
+    // isn't blocked for the full TTL after a transient sweep failure.
+    expect(mockExecute).toHaveBeenCalledTimes(2)
   })
 
   it('does NOT call execute when lock is acquired by another instance', async () => {

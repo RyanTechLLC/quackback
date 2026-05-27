@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { ShieldCheckIcon } from '@heroicons/react/24/outline'
 import { toast } from 'sonner'
 import { listPendingPostsFn, approvePostFn, rejectPostFn } from '@/lib/server/functions/moderation'
@@ -19,6 +20,9 @@ export const Route = createFileRoute('/admin/moderation')({
 
 function ModerationPage() {
   const queryClient = useQueryClient()
+  // Track which row is currently in flight so disabling stays scoped to that
+  // row rather than freezing every Approve/Reject button across the queue.
+  const [pendingId, setPendingId] = useState<string | null>(null)
   const { data, isLoading } = useQuery({
     queryKey: ['admin', 'moderation', 'pending'],
     queryFn: () => listPendingPostsFn(),
@@ -38,11 +42,13 @@ function ModerationPage() {
     mutationFn: (postId: string) => approvePostFn({ data: { postId } }),
     onSuccess: invalidateAfterDecision,
     onError,
+    onSettled: () => setPendingId(null),
   })
   const reject = useMutation({
     mutationFn: (postId: string) => rejectPostFn({ data: { postId } }),
     onSuccess: invalidateAfterDecision,
     onError,
+    onSettled: () => setPendingId(null),
   })
 
   if (isLoading) {
@@ -97,16 +103,22 @@ function ModerationPage() {
                 <div className="flex shrink-0 gap-2">
                   <Button
                     size="sm"
-                    onClick={() => approve.mutate(post.id as string)}
-                    disabled={approve.isPending}
+                    onClick={() => {
+                      setPendingId(post.id as string)
+                      approve.mutate(post.id as string)
+                    }}
+                    disabled={pendingId === post.id}
                   >
                     Approve
                   </Button>
                   <Button
                     size="sm"
                     variant="destructive"
-                    onClick={() => reject.mutate(post.id as string)}
-                    disabled={reject.isPending}
+                    onClick={() => {
+                      setPendingId(post.id as string)
+                      reject.mutate(post.id as string)
+                    }}
+                    disabled={pendingId === post.id}
                   >
                     Reject
                   </Button>

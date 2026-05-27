@@ -211,6 +211,12 @@ function buildConditionSql(condition: SegmentCondition): ReturnType<typeof sql> 
       if (strResult) return strResult
       const sqlOp = OPERATOR_SQL[operator]
       if (!sqlOp) return null
+      // PostgreSQL `NULL != 'x'` is NULL, not TRUE — so a bare neq silently
+      // excludes every locale-unset user. Mirror is_not_set semantics for
+      // 'neq' on this nullable column.
+      if (operator === 'neq') {
+        return sql`(${field} IS NULL OR ${field} != ${String(value)})`
+      }
       return sql`${field} ${sql.raw(sqlOp)} ${String(value)}`
     }
 
@@ -223,6 +229,11 @@ function buildConditionSql(condition: SegmentCondition): ReturnType<typeof sql> 
       if (strResult) return strResult
       const sqlOp = OPERATOR_SQL[operator]
       if (!sqlOp) return null
+      // NULL-safe neq: see 'locale' note above. Users with no country set
+      // satisfy "country is not X" because they don't have country=X.
+      if (operator === 'neq') {
+        return sql`(${field} IS NULL OR ${field} != ${upperValue})`
+      }
       return sql`${field} ${sql.raw(sqlOp)} ${upperValue}`
     }
 
@@ -352,10 +363,18 @@ export async function evaluateDynamicSegment(segmentId: SegmentId): Promise<Eval
         .onConflictDoNothing()
     }
     if (toRemove.length > 0) {
+      // Scope to addedBy='dynamic' so we never wipe rows whose source is
+      // manual / sso / api / widget. Without this, a principal who is both
+      // a manual member and a stale dynamic match loses their manual row
+      // on the next sweep — silently locking them out of segment-gated boards.
       await tx
         .delete(userSegments)
         .where(
-          and(eq(userSegments.segmentId, segmentId), inArray(userSegments.principalId, toRemove))
+          and(
+            eq(userSegments.segmentId, segmentId),
+            eq(userSegments.addedBy, 'dynamic'),
+            inArray(userSegments.principalId, toRemove)
+          )
         )
     }
   })

@@ -78,7 +78,7 @@ export async function createPost(
     displayName?: string
     actor?: Actor
   },
-  options?: { skipDispatch?: boolean }
+  options?: { skipDispatch?: boolean; headers?: Headers }
 ): Promise<CreatePostResult> {
   console.log(`[domain:posts] createPost: boardId=${input.boardId}`)
 
@@ -206,7 +206,13 @@ export async function createPost(
   if (moderationState === 'pending') {
     await recordAuditEvent({
       event: 'post.moderation.held',
-      actor: { userId: author.userId, email: author.email, role: author.actor?.role ?? null },
+      actor: {
+        userId: author.userId,
+        email: author.email,
+        role: author.actor?.role ?? null,
+        type: author.actor?.principalType ?? 'anonymous',
+      },
+      headers: options?.headers,
       target: { type: 'post', id: post.id },
       after: { moderationState: 'pending' },
       metadata: { principalType: author.actor?.principalType ?? 'anonymous' },

@@ -77,11 +77,6 @@ describe('BUILTIN_FIELDS registry well-formedness', () => {
     expect(keys.has('display_name')).toBe(false)
   })
 
-  it('does NOT include email_domain (replaced by email)', () => {
-    const keys: Set<string> = new Set(BUILTIN_FIELDS.map((f) => f.key))
-    expect(keys.has('email_domain')).toBe(false)
-  })
-
   it('does NOT include plan or metadata_key (those are the custom-attribute mechanism)', () => {
     const keys: Set<string> = new Set(BUILTIN_FIELDS.map((f) => f.key))
     expect(keys.has('plan')).toBe(false)

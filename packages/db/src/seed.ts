@@ -742,7 +742,7 @@ async function seed() {
 
     // Raw feedback items - realistic variety of states and sources
     const rawItemPresets: Array<{
-      sourceId: typeof widgetSourceId
+      sourceId: typeof quackbackSourceId
       sourceType: string
       author: RawFeedbackAuthor
       content: RawFeedbackContent

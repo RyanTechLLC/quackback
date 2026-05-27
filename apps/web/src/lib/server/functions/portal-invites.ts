@@ -88,9 +88,12 @@ async function sendOnePortalInvite({
   headers,
   actor,
 }: SendOnePortalInviteArgs): Promise<string> {
-  // Reject if the email already belongs to a team member.
+  // Reject if the email already belongs to a team member. Match
+  // case-insensitively: better-auth normalises on the way in, but older
+  // rows or OAuth providers can store mixed-case addresses, and `email`
+  // here is always lower-cased by the caller.
   const existingTeamUser = await db.query.user.findFirst({
-    where: eq(user.email, email),
+    where: sql`lower(${user.email}) = ${email}`,
   })
   if (existingTeamUser) {
     const existingPrincipal = await db.query.principal.findFirst({
@@ -105,10 +108,12 @@ async function sendOnePortalInvite({
   }
 
   // Reject if a non-expired pending portal invite already exists.
+  // Same case-insensitive match — an old mixed-case invite row would
+  // otherwise sneak past the dedup check.
   const now = new Date()
   const existingInvite = await db.query.invitation.findFirst({
     where: and(
-      eq(invitation.email, email),
+      sql`lower(${invitation.email}) = ${email}`,
       eq(invitation.kind, 'portal'),
       eq(invitation.status, 'pending'),
       gt(invitation.expiresAt, now)
@@ -543,6 +548,18 @@ export const acceptPortalInviteFn = createServerFn({ method: 'POST' })
       return { status: 'mismatch' }
     }
 
+    // Idempotent: already accepted — no second audit event, no further checks.
+    // Runs BEFORE the emailVerified guard: the invite is already consumed,
+    // so the verification-time concerns below ("(b) attacker pre-registers
+    // and consumes the invite") don't apply — re-visits cannot re-consume
+    // an accepted row. Putting alreadyAccepted first means a returning user
+    // whose emailVerified flag was cleared (OAuth reconnection, etc.) still
+    // sees the accepted state instead of being bounced to "verify email".
+    if (inv.status === 'accepted') {
+      console.log(`[fn:portal-invites] acceptPortalInviteFn: already accepted`)
+      return { status: 'accepted', alreadyAccepted: true }
+    }
+
     // Reject unverified-email callers before any state mutation or audit.
     // Two failure modes prevented:
     //   (a) A legit user with an unverified address accepts and is then stuck
@@ -556,12 +573,6 @@ export const acceptPortalInviteFn = createServerFn({ method: 'POST' })
         `[fn:portal-invites] acceptPortalInviteFn: email not verified session=${safeEmail(sessionEmail)}`
       )
       return { status: 'email_not_verified' }
-    }
-
-    // Idempotent: already accepted — no second audit event.
-    if (inv.status === 'accepted') {
-      console.log(`[fn:portal-invites] acceptPortalInviteFn: already accepted`)
-      return { status: 'accepted', alreadyAccepted: true }
     }
 
     if (inv.status === 'canceled') {

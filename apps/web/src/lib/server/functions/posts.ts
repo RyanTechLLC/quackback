@@ -4,6 +4,7 @@
 
 import { z } from 'zod'
 import { createServerFn } from '@tanstack/react-start'
+import { getRequestHeaders } from '@tanstack/react-start/server'
 import {
   type PostId,
   type BoardId,
@@ -372,7 +373,8 @@ export const createPostFn = createServerFn({ method: 'POST' })
           statusId: data.statusId as StatusId | undefined,
           tagIds: data.tagIds as TagId[] | undefined,
         },
-        author
+        author,
+        { headers: getRequestHeaders() }
       )
       console.log(`[fn:posts] createPostFn: id=${result.id}`)
 

@@ -204,11 +204,16 @@ export async function getCommentsWithReplies(
     throw new NotFoundError('BOARD_NOT_FOUND', `Board with ID ${post.boardId} not found`)
   }
 
-  // Collect post IDs: this post + any posts merged into it
-  const mergedPosts = await db.query.posts.findMany({
-    where: and(eq(posts.canonicalPostId, postId), isNull(posts.deletedAt)),
-    columns: { id: true },
-  })
+  // Collect post IDs: this post + any posts merged into it. Exclude
+  // sources whose own board has been soft-deleted — otherwise comments
+  // from a deleted board's posts surface here via the merge tree.
+  const mergedPosts = await db
+    .select({ id: posts.id })
+    .from(posts)
+    .innerJoin(boards, eq(posts.boardId, boards.id))
+    .where(
+      and(eq(posts.canonicalPostId, postId), isNull(posts.deletedAt), isNull(boards.deletedAt))
+    )
   const postIds = [postId, ...mergedPosts.map((p) => p.id)] as PostId[]
 
   // Get all comments with reactions, author info, and status changes (including from merged posts)

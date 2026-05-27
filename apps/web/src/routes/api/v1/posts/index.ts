@@ -233,7 +233,7 @@ export const Route = createFileRoute('/api/v1/posts/')({
               email: principalRecord.user?.email ?? undefined,
               actor,
             },
-            { skipDispatch: auth.importMode }
+            { skipDispatch: auth.importMode, headers: request.headers }
           )
 
           return createdResponse({
