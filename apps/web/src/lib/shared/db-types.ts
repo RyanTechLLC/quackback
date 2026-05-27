@@ -18,6 +18,8 @@ export type * from '@quackback/db/types'
 // Plain-data constants from @quackback/db/types are also safe (no runtime side
 // effects) and let client code stay aligned with the schema defaults.
 export { DEFAULT_BOARD_AUDIENCE } from '@quackback/db/types'
+export { ACCESS_TIERS, ACCESS_TIER_RANK, DEFAULT_BOARD_ACCESS } from '@quackback/db/types'
+export type { AccessTier, BoardAccess } from '@quackback/db/types'
 
 // Schema types needed by client components (type-only = no side effects)
 export type {

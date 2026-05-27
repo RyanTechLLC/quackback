@@ -49,6 +49,51 @@ export type BoardAudience =
 
 export const DEFAULT_BOARD_AUDIENCE: BoardAudience = { kind: 'public' }
 
+// ----------------------------------------------------------------------
+// Per-action access tiers (View+Vote / Comment / Submit) and per-board
+// approval overrides. Lives alongside BoardAudience during the additive
+// migration; BoardAudience is removed once all callers migrate.
+// ----------------------------------------------------------------------
+
+export const ACCESS_TIERS = ['anonymous', 'authenticated', 'segments', 'team'] as const
+export type AccessTier = (typeof ACCESS_TIERS)[number]
+
+/** Restriction rank — higher number is stricter. Used for tier-invariant
+ *  checks: a derived action (comment / submit) cannot be more permissive
+ *  than view. */
+export const ACCESS_TIER_RANK: Record<AccessTier, number> = {
+  anonymous: 0,
+  authenticated: 1,
+  segments: 2,
+  team: 3,
+}
+
+export interface BoardAccess {
+  view: AccessTier
+  comment: AccessTier
+  submit: AccessTier
+  /** Board-level segment list — used wherever any tier === 'segments'.
+   *  Invalid (and rejected on save) when at least one tier is 'segments'
+   *  but this array is empty. */
+  segmentIds: string[]
+  approval: {
+    /** Hold new posts on this board for review (any non-team submitter).
+     *  Composes OR with workspace requireApproval — a board can be MORE
+     *  strict than the workspace, never more permissive. */
+    posts: boolean
+    /** Hold new comments on this board for review. */
+    comments: boolean
+  }
+}
+
+export const DEFAULT_BOARD_ACCESS: BoardAccess = {
+  view: 'anonymous',
+  comment: 'anonymous',
+  submit: 'anonymous',
+  segmentIds: [],
+  approval: { posts: false, comments: false },
+}
+
 // Integration config (stored in integrations.config JSONB column)
 // Each integration defines its own typed config at the integration layer.
 export type IntegrationConfig = Record<string, unknown>
