@@ -34,13 +34,17 @@
  *    context). Prevents a reload-loop when the cookie was set but
  *    the route loader refuses to recognise the session for some
  *    other reason.
- *  - `quackback.sso.suppressed` (localStorage): set by the signout
- *    flow so a user who explicitly signed out doesn't get yanked
- *    straight back in — even if they close the tab and open a new
- *    one. Cleared only when the user explicitly opts back into SSO
- *    (clicks "Continue with SSO" on a login page) or by an admin
- *    clearing site data. Defense-in-depth alongside RP-initiated
- *    logout, which destroys the IdP session itself.
+ *  - `quackback.sso.suppressed` (sessionStorage): set by the signout
+ *    flow for in-tab protection against the brief race between
+ *    "user clicked sign out" and "RP-initiated logout completes" —
+ *    we don't want this tab to silently re-auth in the half-second
+ *    window before the redirect to the IdP endsession endpoint
+ *    fires. Cross-tab + cross-restart protection comes from
+ *    RP-initiated logout itself, which destroys the IdP session
+ *    so a fresh `prompt=none` returns `login_required` cleanly.
+ *    Keeping this flag tab-scoped means closing and reopening a
+ *    tab a day later auto-signs in normally (the IdP is the
+ *    source of truth for "am I signed in here").
  */
 import { useEffect, useRef } from 'react'
 import { authClient } from '@/lib/client/auth-client'
@@ -67,17 +71,17 @@ export interface UseSilentSsoOptions {
   signedIn: boolean
 }
 
-/** Mark silent SSO as suppressed across browser tabs / restarts.
- *  Called from the signout path so an explicit logout doesn't get
- *  immediately undone on the next page load — even if the user
- *  closes the tab and opens a new one. Lives in localStorage so it
- *  survives sessionStorage's tab-scope reset. */
+/** Mark silent SSO as suppressed for the current tab.
+ *  Called from the signout path so an explicit logout doesn't race
+ *  against an in-flight silent SSO attempt in the same tab during
+ *  the brief window before RP-initiated logout navigates away.
+ *  Cross-tab + cross-restart protection comes from RP-initiated
+ *  logout destroying the IdP session — there's no need to make
+ *  this flag durable. */
 export function suppressSilentSso(): void {
   if (typeof window === 'undefined') return
   try {
-    window.localStorage.setItem(SUPPRESSED_KEY, '1')
-    // Also clear the (sessionStorage-scoped) attempted counter so a
-    // future explicit SSO sign-in gets a fresh attempt budget.
+    window.sessionStorage.setItem(SUPPRESSED_KEY, '1')
     window.sessionStorage.removeItem(ATTEMPTED_KEY)
   } catch {
     /* storage disabled (private mode) — silent SSO will still
@@ -90,6 +94,10 @@ export function suppressSilentSso(): void {
 export function clearSilentSsoSuppression(): void {
   if (typeof window === 'undefined') return
   try {
+    window.sessionStorage.removeItem(SUPPRESSED_KEY)
+    // Old durable flag from an earlier deploy — clear so users who
+    // signed out under the previous code aren't permanently blocked
+    // from silent SSO.
     window.localStorage.removeItem(SUPPRESSED_KEY)
   } catch {
     /* noop */
@@ -107,14 +115,19 @@ export function useSilentSso({ enabled, signedIn }: UseSilentSsoOptions): void {
     if (!enabled) return
     if (ranRef.current) return
 
-    // Two storage scopes intentionally — sessionStorage for the
-    // per-tab "did we already try this load" counter, and
-    // localStorage for the cross-tab "user opted out" flag.
     let attempted = false
     try {
       attempted = !!window.sessionStorage.getItem(ATTEMPTED_KEY)
-      const suppressed = !!window.localStorage.getItem(SUPPRESSED_KEY)
+      const suppressed = !!window.sessionStorage.getItem(SUPPRESSED_KEY)
       if (suppressed) return
+      // One-shot cleanup of the legacy durable flag from an earlier
+      // deploy — anyone who signed out under that build still has
+      // `localStorage['quackback.sso.suppressed'] = '1'` set and
+      // would be permanently blocked from silent SSO. Clear it on
+      // first encounter so behavior matches the new policy.
+      if (window.localStorage.getItem(SUPPRESSED_KEY)) {
+        window.localStorage.removeItem(SUPPRESSED_KEY)
+      }
     } catch {
       /* If storage throws we fall through and rely on the ranRef
          guard — worst case is one extra attempt per load. */
