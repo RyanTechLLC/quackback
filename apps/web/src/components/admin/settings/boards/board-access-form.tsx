@@ -1,7 +1,14 @@
 import { useEffect, useMemo } from 'react'
 import { useForm } from 'react-hook-form'
 import { Link } from '@tanstack/react-router'
-import { GlobeAltIcon, LockClosedIcon, ShieldCheckIcon, UsersIcon } from '@heroicons/react/24/solid'
+import { useQuery } from '@tanstack/react-query'
+import {
+  ExclamationTriangleIcon,
+  GlobeAltIcon,
+  LockClosedIcon,
+  ShieldCheckIcon,
+  UsersIcon,
+} from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { FormError } from '@/components/shared/form-error'
@@ -18,6 +25,7 @@ import {
 import { SegmentMultiSelect } from '@/components/admin/segments/segment-multi-select'
 import { useUpdateBoardAccess } from '@/lib/client/mutations'
 import { useSegments } from '@/lib/client/hooks/use-segments-queries'
+import { settingsQueries } from '@/lib/client/queries/settings'
 import type { BoardId } from '@quackback/ids'
 import {
   ACCESS_TIER_RANK,
@@ -123,9 +131,39 @@ function applyPreset(name: Exclude<PresetName, 'custom'>, current: BoardAccess):
   }
 }
 
+/** Inline warning rendered under a tier section when the chosen tier is
+ *  'anonymous' but the matching workspace-wide kill switch is off. Surfaces
+ *  the silent-conflict at config time so admins don't ship a board that
+ *  invites anonymous traffic the workspace will then block. */
+function KillSwitchWarning({ feature }: { feature: 'voting' | 'commenting' | 'posting' }) {
+  const verb =
+    feature === 'voting'
+      ? 'view but not vote'
+      : feature === 'commenting'
+        ? 'view but not comment'
+        : 'view but not submit'
+  return (
+    <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+      <ExclamationTriangleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span>
+        Anonymous {feature} is off workspace-wide.{' '}
+        <Link to="/admin/settings/moderation" className="underline">
+          Enable in Moderation
+        </Link>{' '}
+        or anonymous users will {verb}.
+      </span>
+    </p>
+  )
+}
+
 export function BoardAccessForm({ board }: BoardAccessFormProps) {
   const mutation = useUpdateBoardAccess()
   const segmentsQuery = useSegments()
+  // Non-suspense — the warnings degrade gracefully if portalConfig hasn't
+  // landed yet (the form stays usable; the conflict surface just appears
+  // once data is in cache).
+  const portalConfigQuery = useQuery(settingsQueries.portalConfig())
+  const features = portalConfigQuery.data?.features
 
   const form = useForm<BoardAccess>({
     defaultValues: board.access ?? DEFAULT_BOARD_ACCESS,
@@ -240,6 +278,9 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
                   ariaLabel="View tier"
                 />
               </FormControl>
+              {values.view === 'anonymous' && features?.anonymousVoting === false && (
+                <KillSwitchWarning feature="voting" />
+              )}
             </FormItem>
           )}
         />
@@ -266,6 +307,9 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
                   ariaLabel="Comment tier"
                 />
               </FormControl>
+              {values.comment === 'anonymous' && features?.anonymousCommenting === false && (
+                <KillSwitchWarning feature="commenting" />
+              )}
             </FormItem>
           )}
         />
@@ -291,6 +335,9 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
                   ariaLabel="Submit tier"
                 />
               </FormControl>
+              {values.submit === 'anonymous' && features?.anonymousPosting === false && (
+                <KillSwitchWarning feature="posting" />
+              )}
             </FormItem>
           )}
         />

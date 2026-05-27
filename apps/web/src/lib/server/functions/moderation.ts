@@ -22,6 +22,7 @@ import {
   principal,
   eq,
   and,
+  or,
   isNull,
   desc,
   sql,
@@ -355,9 +356,37 @@ export const getModerationStatus = createServerFn({ method: 'GET' }).handler(asy
   const pendingCount = postsCount + commentsCount
 
   const portalConfig = await getPortalConfig()
+
+  // Also surface the badge when any board has per-board approval configured,
+  // even if the workspace default is 'none' AND the queue is currently empty.
+  // Without this, an admin who enables hold-posts on a single board sees no
+  // sidebar affordance until the first submission lands — making the queue
+  // discoverable only by chance.
+  let approvalCount = 0
+  try {
+    const approvalRows = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(boards)
+      .where(
+        and(
+          isNull(boards.deletedAt),
+          or(
+            sql`(${boards.access}->'approval'->>'posts')::boolean = true`,
+            sql`(${boards.access}->'approval'->>'comments')::boolean = true`
+          )
+        )
+      )
+    approvalCount = approvalRows[0]?.count ?? 0
+  } catch (err) {
+    console.error('[moderation] per-board approval count failed:', err)
+  }
+
   // Self-consistent: if there is a backlog (e.g. per-board approval routes
   // items to pending while the workspace default is 'none'), surface it.
-  const enabled = portalConfig.moderationDefault.requireApproval !== 'none' || pendingCount > 0
+  const enabled =
+    portalConfig.moderationDefault.requireApproval !== 'none' ||
+    pendingCount > 0 ||
+    approvalCount > 0
 
   return { enabled, pendingCount }
 })

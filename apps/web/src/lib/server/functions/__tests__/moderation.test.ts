@@ -407,6 +407,10 @@ vi.mock('@/lib/server/db', () => ({
     return { kind: 'eq', col, val }
   }),
   and: vi.fn((...conditions: PostCondition[]): AndCondition => ({ kind: 'and', conditions })),
+  // The approval-count query uses or(...) over two JSONB-extract sql tags; the
+  // helper-chain test doubles short-circuit before any condition is evaluated,
+  // so a passthrough that returns the args is enough to satisfy the import.
+  or: vi.fn((...conditions: PostCondition[]) => ({ kind: 'or', conditions })),
   isNull: vi.fn((col: ColRef): IsNullCondition => ({ kind: 'isNull', col })),
   exists: vi.fn((subqueryChain: { __subquery: SubqueryDescriptor | null }): ExistsCondition => {
     // The select chain stashes its from-table + final WHERE on
@@ -872,13 +876,13 @@ describe('listPendingPostsFn — listPendingPosts exclusion + enrichment', () =>
 // ----------------------------------------------------------------------
 
 // Helper: build a db.select mock that returns the pending counts.
-// getModerationStatus issues TWO count queries (posts + comments) in parallel,
-// so stub both calls. Pass a single number to treat it as the posts count and
-// default comments to 0 (preserves the original single-table semantics for
-// existing tests). `enabled` derives purely from the workspace moderation policy.
+// getModerationStatus issues THREE count queries (pending posts, pending
+// comments, per-board approval flags), so stub all three. Pass a single
+// number to treat it as the posts count and default comments/approval to 0
+// (preserves the original single-table semantics for existing tests).
 import { db } from '@/lib/server/db'
 
-function stubSelectCalls(postsCount: number, commentsCount = 0) {
+function stubSelectCalls(postsCount: number, commentsCount = 0, approvalCount = 0) {
   // The count queries join through parent tables (posts→boards, comments→
   // posts→boards) so the fluent chain may include one or more innerJoin
   // calls before the terminal where() resolves the promise. Make the chain
@@ -894,6 +898,7 @@ function stubSelectCalls(postsCount: number, commentsCount = 0) {
   vi.mocked(db.select)
     .mockImplementationOnce(() => makeCountChain(postsCount) as never)
     .mockImplementationOnce(() => makeCountChain(commentsCount) as never)
+    .mockImplementationOnce(() => makeCountChain(approvalCount) as never)
 }
 
 describe('getModerationStatus', () => {
@@ -955,6 +960,34 @@ describe('getModerationStatus', () => {
     }
     expect(result.enabled).toBe(true)
     expect(result.pendingCount).toBe(2)
+  })
+
+  it('enabled=true when a per-board approval flag is set, even with no policy and no backlog', async () => {
+    // Per-board approval (e.g. one board has access.approval.posts=true) means
+    // future submissions WILL be held — the sidebar moderation badge must
+    // surface so admins can find the queue *before* the first submission
+    // lands. Without this, the moderation surface is discoverable only by
+    // chance when a backlog accumulates.
+    stubSelectCalls(0, 0, 1)
+    mockGetPortalConfig.mockResolvedValue({ moderationDefault: { requireApproval: 'none' } })
+    const result = (await getModerationStatusHandler()({ data: {} })) as {
+      enabled: boolean
+      pendingCount: number
+    }
+    expect(result.enabled).toBe(true)
+    expect(result.pendingCount).toBe(0)
+  })
+
+  it('enabled=false when policy=none, no backlog, and no per-board approval flags', async () => {
+    // Sanity counterpoint to the per-board test above: the badge must stay
+    // hidden when nothing is configured AND nothing is pending.
+    stubSelectCalls(0, 0, 0)
+    mockGetPortalConfig.mockResolvedValue({ moderationDefault: { requireApproval: 'none' } })
+    const result = (await getModerationStatusHandler()({ data: {} })) as {
+      enabled: boolean
+      pendingCount: number
+    }
+    expect(result.enabled).toBe(false)
   })
 
   it('enabled=true for a partial gating policy (anonymous), pendingCount passes through', async () => {
