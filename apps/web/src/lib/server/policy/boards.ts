@@ -5,36 +5,45 @@
  * queries and single-row reads use the same predicate.
  */
 import { sql, type SQL } from 'drizzle-orm'
-import { boards, type BoardAudience } from '@/lib/server/db'
+import { boards, type BoardAccess, type AccessTier } from '@/lib/server/db'
 import { allowDecision, denyDecision, isTeamActor, type Actor, type Decision } from './types'
+import { tierAllows } from './access'
 
-const isTeam = isTeamActor
+function viewDenyMessage(tier: AccessTier): string {
+  switch (tier) {
+    case 'anonymous':
+      // Anonymous tier never denies via this function (tierAllows always returns
+      // true), but a message is required by the Decision type's deny variant —
+      // service actors hitting an 'anonymous' tier still pass, so this branch
+      // is effectively unreachable. Keep a sensible string anyway.
+      return 'This board is restricted'
+    case 'authenticated':
+      return 'Sign in to view this board'
+    case 'team':
+      return 'This board is internal'
+    case 'segments':
+      return 'This board is restricted'
+  }
+}
 
 /** Single-row board read authorization. */
-export function canViewBoard(actor: Actor, board: { audience: BoardAudience }): Decision {
-  if (isTeam(actor)) return allowDecision()
-  switch (board.audience.kind) {
-    case 'public':
-      return allowDecision()
-    case 'authenticated':
-      return actor.principalType === 'user'
-        ? allowDecision()
-        : denyDecision('Sign in to view this board')
-    case 'team':
-      return denyDecision('This board is internal')
-    case 'segments':
-      return board.audience.segmentIds.some((id) => actor.segmentIds.has(id as never))
-        ? allowDecision()
-        : denyDecision('This board is restricted')
-  }
+export function canViewBoard(actor: Actor, board: { access: BoardAccess }): Decision {
+  return tierAllows(actor, board.access.view, board.access.segmentIds)
+    ? allowDecision()
+    : denyDecision(viewDenyMessage(board.access.view))
 }
 
 /**
  * SQL predicate for board list queries. The row-by-row truthiness must
  * match canViewBoard exactly — invariant test enforces this.
+ *
+ * NOTE: still reads from the legacy `audience` column. Rewritten to use
+ * `access` in the next task; the dual-write in updateBoardAccessFn keeps
+ * audience and access in lockstep so the two predicates stay aligned
+ * during the transition.
  */
 export function boardViewFilter(actor: Actor): SQL {
-  if (isTeam(actor)) {
+  if (isTeamActor(actor)) {
     return sql`true`
   }
   const memberIds = Array.from(actor.segmentIds) as string[]

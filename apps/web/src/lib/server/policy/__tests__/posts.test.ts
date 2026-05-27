@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest'
 import { canViewPost, canCreatePost, canCreateComment } from '../posts'
 import { ANONYMOUS_ACTOR, type Actor } from '../types'
 import type { SegmentId, PrincipalId } from '@quackback/ids'
-import type { BoardAudience, ModerationState } from '@/lib/server/db'
+import type { BoardAccess, ModerationState } from '@/lib/server/db'
 import { MODERATION_STATES } from '@/lib/server/db'
 
 // ----------------------------------------------------------------------
@@ -60,12 +60,21 @@ const service: Actor = {
 
 const ALL_MODERATION_STATES = [...MODERATION_STATES]
 
-const publicBoard = { audience: { kind: 'public' } as BoardAudience }
-const teamBoard = { audience: { kind: 'team' } as BoardAudience }
-const authBoard = { audience: { kind: 'authenticated' } as BoardAudience }
-const segBoard = {
-  audience: { kind: 'segments', segmentIds: ['segment_trusted'] } as BoardAudience,
-}
+// Equivalent BoardAccess shapes for the four legacy audience kinds. The
+// mapping mirrors audienceToAccess() in board.service — same tier on every
+// action, approval off — so the moderation-state matrix stays meaningful.
+const mkAccess = (view: BoardAccess['view'], segmentIds: string[] = []): BoardAccess => ({
+  view,
+  comment: view,
+  submit: view,
+  segmentIds,
+  approval: { posts: false, comments: false },
+})
+
+const publicBoard = { access: mkAccess('anonymous') }
+const teamBoard = { access: mkAccess('team') }
+const authBoard = { access: mkAccess('authenticated') }
+const segBoard = { access: mkAccess('segments', ['segment_trusted']) }
 
 // ----------------------------------------------------------------------
 // canViewPost — moderationState matrix on a viewable board
@@ -263,7 +272,7 @@ describe('canCreatePost — happy-path moderation matrix (workspace policy)', ()
   ])(
     'requireApproval=$ra + actor.principalType=$actor.principalType → requiresApproval=$want',
     ({ ra, actor, want }) => {
-      const decision = canCreatePost(actor, { audience: { kind: 'public' } }, ra)
+      const decision = canCreatePost(actor, publicBoard, ra)
       expect(decision.allowed).toBe(true)
       if (decision.allowed) expect(decision.requiresApproval).toBe(want)
     }
@@ -299,21 +308,21 @@ describe('canCreatePost — happy-path moderation matrix (workspace policy)', ()
   // from anonymous in the workspace policy enum.
   // ────────────────────────────────────────────────────────────────────
   it('DESIGN PIN: service principalType is gated by requireApproval=anonymous (over-moderates)', () => {
-    const decision = canCreatePost(service, { audience: { kind: 'public' } }, 'anonymous')
+    const decision = canCreatePost(service, publicBoard, 'anonymous')
     expect(decision).toEqual({ allowed: true, requiresApproval: true })
   })
 })
 
 describe('canCreatePost — team always bypasses approval', () => {
   it.each(requireApprovalValues)('admin + requireApproval=%s', (ra) => {
-    expect(canCreatePost(admin, { audience: { kind: 'public' } }, ra)).toEqual({
+    expect(canCreatePost(admin, publicBoard, ra)).toEqual({
       allowed: true,
       requiresApproval: false,
     })
   })
 
   it.each(requireApprovalValues)('member + requireApproval=%s', (ra) => {
-    expect(canCreatePost(member, { audience: { kind: 'public' } }, ra)).toEqual({
+    expect(canCreatePost(member, publicBoard, ra)).toEqual({
       allowed: true,
       requiresApproval: false,
     })
@@ -322,19 +331,19 @@ describe('canCreatePost — team always bypasses approval', () => {
 
 describe('canCreatePost — board view denied → create denied', () => {
   it('anonymous cannot post on authenticated-only board', () => {
-    const decision = canCreatePost(anon, { audience: { kind: 'authenticated' } }, 'none')
+    const decision = canCreatePost(anon, authBoard, 'none')
     expect(decision.allowed).toBe(false)
   })
 
   it('portal user cannot post on team-only board', () => {
-    const decision = canCreatePost(portal, { audience: { kind: 'team' } }, 'none')
+    const decision = canCreatePost(portal, teamBoard, 'none')
     expect(decision.allowed).toBe(false)
   })
 
   it('portal user cannot post on segments-only board if they are not a member', () => {
     const decision = canCreatePost(
       portal,
-      { audience: { kind: 'segments', segmentIds: ['segment_other'] } },
+      { access: mkAccess('segments', ['segment_other']) },
       'none'
     )
     expect(decision.allowed).toBe(false)
@@ -343,12 +352,12 @@ describe('canCreatePost — board view denied → create denied', () => {
 
 describe('canCreatePost — global default treated as none when undefined', () => {
   it('an absent workspace policy resolves to no approval required', () => {
-    const decision = canCreatePost(portal, { audience: { kind: 'public' } }, undefined)
+    const decision = canCreatePost(portal, publicBoard, undefined)
     expect(decision).toEqual({ allowed: true, requiresApproval: false })
   })
 
   it('an anonymous submitter with an absent policy is not gated', () => {
-    const decision = canCreatePost(anon, { audience: { kind: 'public' } }, undefined)
+    const decision = canCreatePost(anon, publicBoard, undefined)
     expect(decision).toEqual({ allowed: true, requiresApproval: false })
   })
 })

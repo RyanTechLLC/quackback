@@ -14,7 +14,7 @@ import { canViewBoard, boardViewFilter } from '../boards'
 import { postViewFilter } from '../posts'
 import { ANONYMOUS_ACTOR, type Actor } from '../types'
 import { createId, type SegmentId, type PrincipalId } from '@quackback/ids'
-import type { BoardAudience } from '@/lib/server/db'
+import type { BoardAudience, BoardAccess, AccessTier } from '@/lib/server/db'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import type { SQL } from 'drizzle-orm'
 
@@ -75,12 +75,35 @@ const audiences: BoardAudience[] = [
   { kind: 'segments', segmentIds: [] },
 ]
 
+// Same kind→tier mapping that audienceToAccess uses in board.service. Inlined
+// here so this test stays a pure-policy unit test (no dependency on the heavy
+// board.service module).
+function audienceKindToAccess(audience: BoardAudience): BoardAccess {
+  const tier: AccessTier =
+    audience.kind === 'public'
+      ? 'anonymous'
+      : audience.kind === 'authenticated'
+        ? 'authenticated'
+        : audience.kind === 'team'
+          ? 'team'
+          : 'segments'
+  const segmentIds = audience.kind === 'segments' ? audience.segmentIds : []
+  return {
+    view: tier,
+    comment: tier,
+    submit: tier,
+    segmentIds,
+    approval: { posts: false, comments: false },
+  }
+}
+
 describe('policy invariants — boards', () => {
   it('canViewBoard is deterministic across calls', () => {
     for (const actor of Object.values(actors)) {
       for (const audience of audiences) {
-        const a = canViewBoard(actor, { audience })
-        const b = canViewBoard(actor, { audience })
+        const access = audienceKindToAccess(audience)
+        const a = canViewBoard(actor, { access })
+        const b = canViewBoard(actor, { access })
         expect(a.allowed).toBe(b.allowed)
       }
     }
@@ -89,32 +112,37 @@ describe('policy invariants — boards', () => {
   it('team (member/admin) always passes regardless of audience', () => {
     for (const actor of [actors.member, actors.admin]) {
       for (const audience of audiences) {
-        expect(canViewBoard(actor, { audience }).allowed).toBe(true)
+        expect(canViewBoard(actor, { access: audienceKindToAccess(audience) }).allowed).toBe(true)
       }
     }
   })
 
   it('anonymous only passes audience.kind === "public"', () => {
     for (const audience of audiences) {
-      expect(canViewBoard(ANONYMOUS_ACTOR, { audience }).allowed).toBe(audience.kind === 'public')
+      expect(
+        canViewBoard(ANONYMOUS_ACTOR, { access: audienceKindToAccess(audience) }).allowed
+      ).toBe(audience.kind === 'public')
     }
   })
 
   it('service principalType is denied by audience="authenticated"', () => {
-    expect(canViewBoard(actors.service, { audience: { kind: 'authenticated' } }).allowed).toBe(
-      false
-    )
+    expect(
+      canViewBoard(actors.service, { access: audienceKindToAccess({ kind: 'authenticated' }) })
+        .allowed
+    ).toBe(false)
   })
 
   it('segment audience never admits a non-member non-team actor', () => {
     for (const audience of audiences.filter((a) => a.kind === 'segments')) {
-      expect(canViewBoard(actors.user, { audience }).allowed).toBe(false)
+      expect(canViewBoard(actors.user, { access: audienceKindToAccess(audience) }).allowed).toBe(
+        false
+      )
     }
   })
 
   it('audience denials always carry a non-empty reason', () => {
     for (const audience of audiences) {
-      const decision = canViewBoard(ANONYMOUS_ACTOR, { audience })
+      const decision = canViewBoard(ANONYMOUS_ACTOR, { access: audienceKindToAccess(audience) })
       if (!decision.allowed) {
         expect(decision.reason.length).toBeGreaterThan(0)
       }

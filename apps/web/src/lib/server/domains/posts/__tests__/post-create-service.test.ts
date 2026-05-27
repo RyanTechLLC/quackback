@@ -53,6 +53,13 @@ vi.mock('@/lib/server/db', async () => {
             slug: 'feedback',
             name: 'Feedback',
             audience: { kind: 'public' },
+            access: {
+              view: 'anonymous',
+              comment: 'anonymous',
+              submit: 'anonymous',
+              segmentIds: [],
+              approval: { posts: false, comments: false },
+            },
           }),
         },
         postStatuses: {
@@ -170,6 +177,13 @@ describe('createPost held audit event', () => {
       slug: 'feedback',
       name: 'Feedback',
       audience: { kind: 'public' },
+      access: {
+        view: 'anonymous',
+        comment: 'anonymous',
+        submit: 'anonymous',
+        segmentIds: [],
+        approval: { posts: false, comments: false },
+      },
     } as unknown as Awaited<ReturnType<typeof db.query.boards.findFirst>>)
     // Workspace moderation policy requires approval for all submissions.
     vi.mocked(getPortalConfig).mockResolvedValueOnce({
@@ -211,6 +225,13 @@ describe('createPost held audit event', () => {
       slug: 'feedback',
       name: 'Feedback',
       audience: { kind: 'public' },
+      access: {
+        view: 'anonymous',
+        comment: 'anonymous',
+        submit: 'anonymous',
+        segmentIds: [],
+        approval: { posts: false, comments: false },
+      },
     } as unknown as Awaited<ReturnType<typeof db.query.boards.findFirst>>)
     vi.mocked(getPortalConfig).mockResolvedValueOnce({
       moderationDefault: { requireApproval: 'none' },
@@ -255,6 +276,13 @@ describe('createPost dispatch guard (moderation)', () => {
       slug: 'feedback',
       name: 'Feedback',
       audience: { kind: 'public' },
+      access: {
+        view: 'anonymous',
+        comment: 'anonymous',
+        submit: 'anonymous',
+        segmentIds: [],
+        approval: { posts: false, comments: false },
+      },
     } as unknown as Awaited<ReturnType<typeof db.query.boards.findFirst>>)
     vi.mocked(getPortalConfig).mockResolvedValueOnce({
       moderationDefault: { requireApproval: 'all' },
@@ -287,6 +315,13 @@ describe('createPost dispatch guard (moderation)', () => {
       slug: 'feedback',
       name: 'Feedback',
       audience: { kind: 'public' },
+      access: {
+        view: 'anonymous',
+        comment: 'anonymous',
+        submit: 'anonymous',
+        segmentIds: [],
+        approval: { posts: false, comments: false },
+      },
     } as unknown as Awaited<ReturnType<typeof db.query.boards.findFirst>>)
     vi.mocked(getPortalConfig).mockResolvedValueOnce({
       moderationDefault: { requireApproval: 'none' },
@@ -319,6 +354,13 @@ describe('createPost dispatch guard (moderation)', () => {
       slug: 'feedback',
       name: 'Feedback',
       audience: { kind: 'public' },
+      access: {
+        view: 'anonymous',
+        comment: 'anonymous',
+        submit: 'anonymous',
+        segmentIds: [],
+        approval: { posts: false, comments: false },
+      },
     } as unknown as Awaited<ReturnType<typeof db.query.boards.findFirst>>)
     vi.mocked(getPortalConfig).mockResolvedValueOnce({
       moderationDefault: { requireApproval: 'all' },

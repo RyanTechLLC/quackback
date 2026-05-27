@@ -137,7 +137,7 @@ export async function createPost(
   const portalConfig = await getPortalConfig()
   const createDecision = canCreatePost(
     author.actor ?? ANONYMOUS_ACTOR,
-    { audience: board.audience },
+    { access: board.access },
     portalConfig.moderationDefault.requireApproval
   )
   if (!createDecision.allowed) {

@@ -52,6 +52,13 @@ describe('getPublicBoardById — defensive policy check', () => {
     mockFindFirst.mockResolvedValueOnce({
       id: 'brd_team' as BoardId,
       audience: { kind: 'team' },
+      access: {
+        view: 'team',
+        comment: 'team',
+        submit: 'team',
+        segmentIds: [],
+        approval: { posts: false, comments: false },
+      },
     })
     const { getPublicBoardById } = await import('../board.public')
     const result = await getPublicBoardById('brd_team' as BoardId, actor({ role: 'admin' }))
@@ -62,6 +69,13 @@ describe('getPublicBoardById — defensive policy check', () => {
     mockFindFirst.mockResolvedValueOnce({
       id: 'brd_team' as BoardId,
       audience: { kind: 'team' },
+      access: {
+        view: 'team',
+        comment: 'team',
+        submit: 'team',
+        segmentIds: [],
+        approval: { posts: false, comments: false },
+      },
     })
     const { getPublicBoardById } = await import('../board.public')
     const result = await getPublicBoardById('brd_team' as BoardId, actor({ role: 'user' }))
@@ -72,6 +86,13 @@ describe('getPublicBoardById — defensive policy check', () => {
     mockFindFirst.mockResolvedValueOnce({
       id: 'brd_seg' as BoardId,
       audience: { kind: 'segments', segmentIds: ['seg_alpha'] },
+      access: {
+        view: 'segments',
+        comment: 'segments',
+        submit: 'segments',
+        segmentIds: ['seg_alpha'],
+        approval: { posts: false, comments: false },
+      },
     })
     const { getPublicBoardById } = await import('../board.public')
     const result = await getPublicBoardById('brd_seg' as BoardId, actor({ role: 'user' }))
@@ -82,6 +103,13 @@ describe('getPublicBoardById — defensive policy check', () => {
     mockFindFirst.mockResolvedValueOnce({
       id: 'brd_seg' as BoardId,
       audience: { kind: 'segments', segmentIds: ['seg_alpha'] },
+      access: {
+        view: 'segments',
+        comment: 'segments',
+        submit: 'segments',
+        segmentIds: ['seg_alpha'],
+        approval: { posts: false, comments: false },
+      },
     })
     const { getPublicBoardById } = await import('../board.public')
     const result = await getPublicBoardById(
@@ -105,7 +133,17 @@ describe('getPublicBoardById — defensive policy check', () => {
     // notably createPublicPostFn, which would happily accept new posts on a
     // deleted board. The sibling getPublicBoardBySlug has had the guard for
     // a long time; this test brings the byId variant in line.
-    mockFindFirst.mockResolvedValueOnce({ id: 'brd_x' as BoardId, audience: { kind: 'public' } })
+    mockFindFirst.mockResolvedValueOnce({
+      id: 'brd_x' as BoardId,
+      audience: { kind: 'public' },
+      access: {
+        view: 'anonymous',
+        comment: 'anonymous',
+        submit: 'anonymous',
+        segmentIds: [],
+        approval: { posts: false, comments: false },
+      },
+    })
     const { getPublicBoardById } = await import('../board.public')
     await getPublicBoardById('brd_x' as BoardId, actor())
 

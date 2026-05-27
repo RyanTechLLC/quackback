@@ -74,6 +74,13 @@ vi.mock('@/lib/server/db', async () => {
               id: 'board_b',
               slug: 'b',
               audience: { kind: 'public' },
+              access: {
+                view: 'anonymous',
+                comment: 'anonymous',
+                submit: 'anonymous',
+                segmentIds: [],
+                approval: { posts: false, comments: false },
+              },
             },
           }),
         },

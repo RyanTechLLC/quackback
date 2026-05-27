@@ -112,7 +112,7 @@ export async function getPublicPostDetail(
         boardId: boards.id,
         boardName: boards.name,
         boardSlug: boards.slug,
-        boardAudience: boards.audience,
+        boardAccess: boards.access,
         postModerationState: posts.moderationState,
         postPrincipalId: posts.principalId,
         tagsJson: sql<string>`COALESCE(
@@ -290,7 +290,7 @@ export async function getPublicPostDetail(
   const viewDecision = canViewPost(
     actor,
     { moderationState: postResult.postModerationState, principalId: postResult.postPrincipalId },
-    { audience: postResult.boardAudience }
+    { access: postResult.boardAccess }
   )
   if (!viewDecision.allowed) {
     return null

@@ -26,7 +26,7 @@ export async function assertPostViewable(postId: PostId, actor: Actor): Promise<
     .select({
       moderationState: posts.moderationState,
       principalId: posts.principalId,
-      audience: boards.audience,
+      access: boards.access,
     })
     .from(posts)
     .innerJoin(boards, eq(posts.boardId, boards.id))
@@ -41,7 +41,7 @@ export async function assertPostViewable(postId: PostId, actor: Actor): Promise<
   const decision = canViewPost(
     actor,
     { moderationState: row.moderationState, principalId: row.principalId },
-    { audience: row.audience }
+    { access: row.access }
   )
   if (!decision.allowed) {
     // 404-shape on deny so we don't leak existence to a denied caller.
@@ -68,7 +68,7 @@ export async function assertCommentViewable(commentId: CommentId, actor: Actor):
       isPrivate: comments.isPrivate,
       postModerationState: posts.moderationState,
       postPrincipalId: posts.principalId,
-      audience: boards.audience,
+      access: boards.access,
     })
     .from(comments)
     .innerJoin(posts, eq(comments.postId, posts.id))
@@ -91,7 +91,7 @@ export async function assertCommentViewable(commentId: CommentId, actor: Actor):
   const decision = canViewPost(
     actor,
     { moderationState: row.postModerationState, principalId: row.postPrincipalId },
-    { audience: row.audience }
+    { access: row.access }
   )
   if (!decision.allowed) {
     throw new NotFoundError('COMMENT_NOT_FOUND', `Comment ${commentId} not found`)

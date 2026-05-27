@@ -5,7 +5,7 @@
  * isn't visible, and create is always denied when view is denied.
  */
 import { and, eq, or, sql, type SQL } from 'drizzle-orm'
-import { posts, type BoardAudience, type ModerationState } from '@/lib/server/db'
+import { posts, type BoardAccess, type ModerationState } from '@/lib/server/db'
 import type { PrincipalId } from '@quackback/ids'
 import { allowDecision, denyDecision, isTeamActor, type Actor, type Decision } from './types'
 import { canViewBoard, boardViewFilter } from './boards'
@@ -19,7 +19,7 @@ interface PostShape {
 }
 
 interface BoardShape {
-  audience: BoardAudience
+  access: BoardAccess
 }
 
 const isTeam = isTeamActor
