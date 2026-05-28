@@ -168,17 +168,20 @@ interface BoardAccessFormProps {
 type FormShape = BoardAccess
 
 function deriveInitialPreset(access: BoardAccess): PresetName {
+  // Approval flags are intentionally NOT part of preset detection: this UI
+  // doesn't surface them, so a board with a workspace/legacy approval value
+  // set should still display as its tier-preset rather than collapsing to
+  // Custom (which would reveal the matrix unexpectedly).
   for (const meta of PRESET_META) {
     const tiersMatch =
       access.view === meta.tiers.view &&
       access.comment === meta.tiers.comment &&
       access.submit === meta.tiers.submit
-    const approvalOff = !access.approval.posts && !access.approval.comments
     const segmentsClean =
       access.segments.view.length === 0 &&
       access.segments.comment.length === 0 &&
       access.segments.submit.length === 0
-    if (tiersMatch && approvalOff && segmentsClean) return meta.id
+    if (tiersMatch && segmentsClean) return meta.id
   }
   return 'custom'
 }
@@ -289,21 +292,34 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
 
       // Cascade: raising view tier may force comment/submit up to keep
       // the invariant comment.rank >= view.rank && submit.rank >= view.rank.
+      // We collect the cascaded action ids so the picker auto-open below
+      // can fire for the FIRST action that lands on the segments tier with
+      // no existing selection.
+      const cascadedToSegments: ActionId[] = []
       if (actionId === 'view') {
         const vRank = ACCESS_TIER_RANK[tierId]
         if (ACCESS_TIER_RANK[values.comment] < vRank) {
           form.setValue('comment', tierId, { shouldDirty: true })
+          if (tierId === 'segments' && (values.segments.comment ?? []).length === 0) {
+            cascadedToSegments.push('comment')
+          }
         }
         if (ACCESS_TIER_RANK[values.submit] < vRank) {
           form.setValue('submit', tierId, { shouldDirty: true })
+          if (tierId === 'segments' && (values.segments.submit ?? []).length === 0) {
+            cascadedToSegments.push('submit')
+          }
         }
       }
 
-      // Picker hint: auto-open the segments popover for the action when
-      // it first lands on the segments tier with an empty list.
+      // Picker hint: open the segments popover for the action that first
+      // lands on the segments tier with an empty list. Preference:
+      // the action the user clicked, then the cascaded actions in order.
       if (tierId === 'segments') {
         if ((values.segments[actionId] ?? []).length === 0) {
           setOpenPicker(actionId)
+        } else if (cascadedToSegments[0]) {
+          setOpenPicker(cascadedToSegments[0])
         }
       } else if (openPicker === actionId) {
         setOpenPicker(null)

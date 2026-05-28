@@ -24,14 +24,17 @@ vi.mock('@/lib/server/domains/api/auth', () => ({
 vi.mock('@/lib/server/domains/boards/board.service', () => ({
   createBoard: (...args: unknown[]) => mockCreateBoard(...args),
   listBoardsWithDetails: (...args: unknown[]) => mockListBoardsWithDetails(...args),
-  accessToAudience: (access: { view: string; segmentIds: string[] }) => {
+  accessToAudience: (access: {
+    view: string
+    segments: { view: string[]; comment: string[]; submit: string[] }
+  }) => {
     switch (access.view) {
       case 'anonymous':
         return { kind: 'public' }
       case 'authenticated':
         return { kind: 'authenticated' }
       case 'segments':
-        return { kind: 'segments', segmentIds: access.segmentIds }
+        return { kind: 'segments', segmentIds: access.segments.view }
       case 'team':
         return { kind: 'team' }
       default:
@@ -58,7 +61,7 @@ const CREATED_BOARD = {
     view: 'anonymous',
     comment: 'anonymous',
     submit: 'anonymous',
-    segmentIds: [],
+    segments: { view: [], comment: [], submit: [] },
     approval: { posts: false, comments: false },
   },
   createdAt: new Date(),

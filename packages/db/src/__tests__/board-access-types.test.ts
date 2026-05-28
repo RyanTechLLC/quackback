@@ -26,7 +26,7 @@ describe('AccessTier definitions', () => {
       view: 'anonymous',
       comment: 'anonymous',
       submit: 'anonymous',
-      segmentIds: [],
+      segments: { view: [], comment: [], submit: [] },
       approval: { posts: false, comments: false },
     })
   })
@@ -36,7 +36,7 @@ describe('AccessTier definitions', () => {
       view: 'anonymous' as AccessTier,
       comment: 'authenticated',
       submit: 'segments',
-      segmentIds: ['segment_alpha'],
+      segments: { view: [], comment: [], submit: ['segment_alpha'] },
       approval: { posts: true, comments: false },
     }
     expect(sample.view).toBe('anonymous')
