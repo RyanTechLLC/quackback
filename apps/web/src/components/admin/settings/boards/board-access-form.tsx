@@ -291,20 +291,21 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
     (id: Exclude<PresetName, 'custom'>) => {
       const meta = PRESET_META.find((p) => p.id === id)
       if (!meta) return
-      form.reset({
-        view: meta.tiers.view,
-        vote: meta.tiers.vote,
-        comment: meta.tiers.comment,
-        submit: meta.tiers.submit,
-        // Presets always clear segment lists — they target non-segments tiers.
-        segments: { view: [], vote: [], comment: [], submit: [] },
-        // Preserve moderation: presets target access only; the Moderation
-        // sub-tab owns those fields.
-        moderation: values.moderation,
-      })
+      // Apply via setValue (not form.reset) so the change is tracked as
+      // dirty and the save bar appears. reset() re-baselines defaultValues,
+      // leaving isDirty false — which silently hides the save dock after a
+      // preset click. moderation is left untouched (owned by the Moderation
+      // sub-tab); presets target the access matrix only.
+      const opts = { shouldDirty: true } as const
+      form.setValue('view', meta.tiers.view, opts)
+      form.setValue('vote', meta.tiers.vote, opts)
+      form.setValue('comment', meta.tiers.comment, opts)
+      form.setValue('submit', meta.tiers.submit, opts)
+      // Presets always clear segment lists — they target non-segments tiers.
+      form.setValue('segments', { view: [], vote: [], comment: [], submit: [] }, opts)
       setOpenPicker(null)
     },
-    [form, values.moderation]
+    [form]
   )
 
   const handleTierClick = useCallback(

@@ -215,6 +215,31 @@ describe('<BoardAccessForm> presets', () => {
     expect(isCellSelected('Submit posts', 'Signed-in')).toBe(true)
   })
 
+  it('clicking a preset surfaces the save bar (preset change is dirty, not a reset)', () => {
+    // Regression: applying a preset via form.reset() re-baselined the
+    // defaults so isDirty stayed false and the save dock never appeared,
+    // leaving the user unable to save a preset change. Presets must mark
+    // the form dirty.
+    renderForm({
+      view: 'team',
+      vote: 'team',
+      comment: 'team',
+      submit: 'team',
+      segments: { view: [], vote: [], comment: [], submit: [] },
+      moderation: { anonPosts: 'inherit', signedPosts: 'inherit', comments: 'inherit' },
+    })
+    // Save bar hidden initially (clean form).
+    expect(
+      screen.getByRole('region', { name: /save changes/i }).getAttribute('data-dirty')
+    ).toBeNull()
+    // Click a different preset → form is now dirty → save bar appears.
+    fireEvent.click(screen.getByRole('button', { name: 'Public' }))
+    expect(screen.getByRole('region', { name: /save changes/i }).getAttribute('data-dirty')).toBe(
+      'true'
+    )
+    expect(screen.getByRole('button', { name: /save changes/i })).not.toBeDisabled()
+  })
+
   it('preset flips to Custom after editing a cell, and back to Public when restored', () => {
     renderForm(PUBLIC_ACCESS)
     // Start in Public
