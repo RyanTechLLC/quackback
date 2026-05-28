@@ -254,7 +254,7 @@ describe('Comment count maintenance', () => {
     })
 
     it('does NOT increment commentCount when holding a pending comment', async () => {
-      // Switch the board fixture to approval.comments=true so a portal
+      // Switch the board fixture to moderation.comments='on' so a portal
       // commenter lands as moderationState='pending'. The insert path
       // must skip the commentCount bump — approveCommentFn re-increments
       // when the comment becomes publicly visible.
