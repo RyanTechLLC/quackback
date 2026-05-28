@@ -108,11 +108,11 @@ function BoardTabContent({ board, tab }: BoardTabContentProps): ReactNode {
       return (
         <div className="space-y-6">
           <SettingsCard title="Board Details">
-            <BoardGeneralForm board={board} />
+            <BoardGeneralForm key={board.id} board={board} />
           </SettingsCard>
 
           <SettingsCard title="Danger Zone" variant="danger">
-            <DeleteBoardForm board={board} />
+            <DeleteBoardForm key={board.id} board={board} />
           </SettingsCard>
         </div>
       )
