@@ -110,6 +110,44 @@ export function canCreateComment(
   }
 }
 
+export type VoteDecision = { allowed: true } | { allowed: false; reason: string }
+
+function voteDenyMessage(tier: AccessTier): string {
+  switch (tier) {
+    case 'anonymous':
+      // Unreachable in practice — tierAllows('anonymous', …) always passes.
+      return 'Voting is not allowed on this board'
+    case 'authenticated':
+      return 'Sign in to vote on this board'
+    case 'segments':
+      return 'Only specific groups can vote on this board'
+    case 'team':
+      return 'Only team members can vote on this board'
+  }
+}
+
+/**
+ * Whether the requesting actor can vote on a post.
+ *
+ * Rules (applied in order):
+ * 1. The actor must be able to view the post (board view tier + moderation state).
+ * 2. The actor must satisfy the board's vote tier — independent of view
+ *    (a board can be public-to-view but authenticated-only-to-vote, the
+ *    modern-SaaS "Public" preset).
+ *
+ * The workspace `features.anonymousVoting` kill switch is composed
+ * separately by the caller — this policy is the per-board check.
+ */
+export function canVotePost(actor: Actor, post: PostShape, board: BoardShape): VoteDecision {
+  const view = canViewPost(actor, post, board)
+  if (!view.allowed) return { allowed: false, reason: view.reason }
+
+  if (!tierAllows(actor, board.access.vote, board.access.segments.vote)) {
+    return { allowed: false, reason: voteDenyMessage(board.access.vote) }
+  }
+  return { allowed: true }
+}
+
 export type CreateDecision =
   | { allowed: true; requiresApproval: boolean }
   | { allowed: false; reason: string }

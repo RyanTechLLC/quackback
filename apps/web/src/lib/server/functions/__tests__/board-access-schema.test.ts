@@ -3,9 +3,10 @@ import { boardAccessSchema } from '../boards'
 
 const baseValid = {
   view: 'anonymous' as const,
+  vote: 'anonymous' as const,
   comment: 'anonymous' as const,
   submit: 'anonymous' as const,
-  segments: { view: [], comment: [], submit: [] },
+  segments: { view: [], vote: [], comment: [], submit: [] },
   approval: { posts: false, comments: false },
 }
 
@@ -31,9 +32,10 @@ describe('boardAccessSchema — valid shapes', () => {
       boardAccessSchema.parse({
         ...baseValid,
         view: 'segments',
+        vote: 'segments',
         comment: 'segments',
         submit: 'segments',
-        segments: { view: ['seg_a'], comment: ['seg_a'], submit: ['seg_a'] },
+        segments: { view: ['seg_a'], vote: ['seg_a'], comment: ['seg_a'], submit: ['seg_a'] },
       })
     ).not.toThrow()
   })
@@ -43,9 +45,10 @@ describe('boardAccessSchema — valid shapes', () => {
       boardAccessSchema.parse({
         ...baseValid,
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'segments',
         submit: 'segments',
-        segments: { view: [], comment: ['seg_a'], submit: ['seg_a'] },
+        segments: { view: [], vote: [], comment: ['seg_a'], submit: ['seg_a'] },
       })
     ).not.toThrow()
   })
@@ -55,9 +58,15 @@ describe('boardAccessSchema — valid shapes', () => {
       boardAccessSchema.parse({
         ...baseValid,
         view: 'segments',
+        vote: 'segments',
         comment: 'segments',
         submit: 'segments',
-        segments: { view: ['seg_pro'], comment: ['seg_pro'], submit: ['seg_beta'] },
+        segments: {
+          view: ['seg_pro'],
+          vote: ['seg_pro'],
+          comment: ['seg_pro'],
+          submit: ['seg_beta'],
+        },
       })
     ).not.toThrow()
   })
@@ -81,9 +90,10 @@ describe('boardAccessSchema — tier rank invariants', () => {
       boardAccessSchema.parse({
         ...baseValid,
         view: 'segments',
+        vote: 'segments',
         comment: 'anonymous',
         submit: 'segments',
-        segments: { view: ['seg_a'], comment: [], submit: ['seg_a'] },
+        segments: { view: ['seg_a'], vote: ['seg_a'], comment: [], submit: ['seg_a'] },
       })
     ).toThrow(/comment/i)
   })
@@ -95,9 +105,10 @@ describe('boardAccessSchema — segments invariant', () => {
       boardAccessSchema.parse({
         ...baseValid,
         view: 'segments',
+        vote: 'segments',
         comment: 'segments',
         submit: 'segments',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
       })
     ).toThrow(/segment/i)
   })
@@ -107,9 +118,10 @@ describe('boardAccessSchema — segments invariant', () => {
       boardAccessSchema.parse({
         ...baseValid,
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'anonymous',
         submit: 'segments',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
       })
     ).toThrow(/segment/i)
   })
@@ -119,9 +131,10 @@ describe('boardAccessSchema — segments invariant', () => {
       boardAccessSchema.parse({
         ...baseValid,
         view: 'segments',
+        vote: 'segments',
         comment: 'segments',
         submit: 'segments',
-        segments: { view: ['seg_a'], comment: [], submit: ['seg_a'] },
+        segments: { view: ['seg_a'], vote: ['seg_a'], comment: [], submit: ['seg_a'] },
       })
     ).toThrow(/segment/i)
   })
@@ -132,11 +145,47 @@ describe('boardAccessSchema — segments invariant', () => {
       boardAccessSchema.parse({
         ...baseValid,
         view: 'segments',
+        vote: 'segments',
         comment: 'segments',
         submit: 'segments',
-        segments: { view: fifty1, comment: ['seg_a'], submit: ['seg_a'] },
+        segments: { view: fifty1, vote: ['seg_a'], comment: ['seg_a'], submit: ['seg_a'] },
       })
     ).toThrow(/50/)
+  })
+})
+
+describe('boardAccessSchema — vote action invariants', () => {
+  it('rejects vote tier below view tier (would let denied viewers vote)', () => {
+    expect(() =>
+      boardAccessSchema.parse({
+        ...baseValid,
+        view: 'authenticated',
+        vote: 'anonymous',
+      })
+    ).toThrow(/vote/i)
+  })
+
+  it('accepts vote tier stricter than view tier (modern "Public": view=anonymous, vote=authenticated)', () => {
+    expect(() =>
+      boardAccessSchema.parse({
+        ...baseValid,
+        view: 'anonymous',
+        vote: 'authenticated',
+      })
+    ).not.toThrow()
+  })
+
+  it('rejects when vote is segments and the vote list is empty', () => {
+    expect(() =>
+      boardAccessSchema.parse({
+        ...baseValid,
+        view: 'segments',
+        vote: 'segments',
+        comment: 'segments',
+        submit: 'segments',
+        segments: { view: ['seg_a'], vote: [], comment: ['seg_a'], submit: ['seg_a'] },
+      })
+    ).toThrow(/vote/i)
   })
 })
 

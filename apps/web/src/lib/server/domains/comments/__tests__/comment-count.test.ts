@@ -95,9 +95,10 @@ vi.mock('@/lib/server/db', async () => {
             slug: 'test',
             access: {
               view: 'anonymous',
+              vote: 'anonymous',
               comment: 'anonymous',
               submit: 'anonymous',
-              segments: { view: [], comment: [], submit: [] },
+              segments: { view: [], vote: [], comment: [], submit: [] },
               approval: { posts: false, comments: false },
             },
           },
@@ -262,9 +263,10 @@ describe('Comment count maintenance', () => {
           slug: 'test',
           access: {
             view: 'anonymous',
+            vote: 'anonymous',
             comment: 'anonymous',
             submit: 'anonymous',
-            segments: { view: [], comment: [], submit: [] },
+            segments: { view: [], vote: [], comment: [], submit: [] },
             approval: { posts: false, comments: true },
           },
         },

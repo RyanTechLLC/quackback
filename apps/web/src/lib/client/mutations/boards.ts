@@ -46,9 +46,10 @@ export function useCreateBoard() {
         description: input.description ?? null,
         access: {
           view: tier,
+          vote: tier,
           comment: tier,
           submit: tier,
-          segments: { view: [], comment: [], submit: [] },
+          segments: { view: [], vote: [], comment: [], submit: [] },
           approval: { posts: false, comments: false },
         },
         settings: {},

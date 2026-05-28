@@ -74,11 +74,17 @@ const serviceInAlpha: Actor = {
 // below keeps its meaning post-migration.
 // ----------------------------------------------------------------------
 
-const sharedSegments = (ids: string[]) => ({ view: ids, comment: ids, submit: ids })
+const sharedSegments = (ids: string[]) => ({
+  view: ids,
+  vote: ids,
+  comment: ids,
+  submit: ids,
+})
 
 const A: Record<string, BoardAccess> = {
   public: {
     view: 'anonymous',
+    vote: 'anonymous',
     comment: 'anonymous',
     submit: 'anonymous',
     segments: sharedSegments([]),
@@ -86,6 +92,7 @@ const A: Record<string, BoardAccess> = {
   },
   authenticated: {
     view: 'authenticated',
+    vote: 'authenticated',
     comment: 'authenticated',
     submit: 'authenticated',
     segments: sharedSegments([]),
@@ -93,6 +100,7 @@ const A: Record<string, BoardAccess> = {
   },
   team: {
     view: 'team',
+    vote: 'team',
     comment: 'team',
     submit: 'team',
     segments: sharedSegments([]),
@@ -100,6 +108,7 @@ const A: Record<string, BoardAccess> = {
   },
   segmentAlpha: {
     view: 'segments',
+    vote: 'segments',
     comment: 'segments',
     submit: 'segments',
     segments: sharedSegments(['segment_alpha']),
@@ -107,6 +116,7 @@ const A: Record<string, BoardAccess> = {
   },
   segmentBeta: {
     view: 'segments',
+    vote: 'segments',
     comment: 'segments',
     submit: 'segments',
     segments: sharedSegments(['segment_beta']),
@@ -114,6 +124,7 @@ const A: Record<string, BoardAccess> = {
   },
   segmentAlphaBeta: {
     view: 'segments',
+    vote: 'segments',
     comment: 'segments',
     submit: 'segments',
     segments: sharedSegments(['segment_alpha', 'segment_beta']),
@@ -121,6 +132,7 @@ const A: Record<string, BoardAccess> = {
   },
   segmentEmpty: {
     view: 'segments',
+    vote: 'segments',
     comment: 'segments',
     submit: 'segments',
     segments: sharedSegments([]),

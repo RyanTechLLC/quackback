@@ -172,9 +172,10 @@ function setupMentionDbChain(rows: unknown[]) {
       principalId: 'prn_author',
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'anonymous',
         submit: 'anonymous',
-        segmentIds: [],
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       },
     },

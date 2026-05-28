@@ -101,9 +101,10 @@ const BASE_DATE = new Date('2025-01-01T00:00:00Z')
 
 type BoardAccess = {
   view: 'anonymous' | 'authenticated' | 'segments' | 'team'
+  vote: 'anonymous' | 'authenticated' | 'segments' | 'team'
   comment: 'anonymous' | 'authenticated' | 'segments' | 'team'
   submit: 'anonymous' | 'authenticated' | 'segments' | 'team'
-  segments: { view: string[]; comment: string[]; submit: string[] }
+  segments: { view: string[]; vote: string[]; comment: string[]; submit: string[] }
   approval: { posts: boolean; comments: boolean }
 }
 type BoardRow = {
@@ -125,9 +126,10 @@ const BOARD_ROW: BoardRow = {
   description: null,
   access: {
     view: 'segments',
+    vote: 'segments',
     comment: 'segments',
     submit: 'segments',
-    segments: { view: ['seg_1'], comment: ['seg_1'], submit: ['seg_1'] },
+    segments: { view: ['seg_1'], vote: ['seg_1'], comment: ['seg_1'], submit: ['seg_1'] },
     approval: { posts: false, comments: false },
   },
   settings: {},

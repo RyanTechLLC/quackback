@@ -60,6 +60,7 @@ export const ACCESS_TIER_RANK: Record<AccessTier, number> = {
 
 export interface BoardAccess {
   view: AccessTier
+  vote: AccessTier
   comment: AccessTier
   submit: AccessTier
   /** Per-action segment allowlists — used wherever the matching tier is
@@ -68,6 +69,7 @@ export interface BoardAccess {
    *  an action's tier is 'segments' but that action's list is empty. */
   segments: {
     view: string[]
+    vote: string[]
     comment: string[]
     submit: string[]
   }
@@ -83,9 +85,10 @@ export interface BoardAccess {
 
 export const DEFAULT_BOARD_ACCESS: BoardAccess = {
   view: 'anonymous',
+  vote: 'anonymous',
   comment: 'anonymous',
   submit: 'anonymous',
-  segments: { view: [], comment: [], submit: [] },
+  segments: { view: [], vote: [], comment: [], submit: [] },
   approval: { posts: false, comments: false },
 }
 

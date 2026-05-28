@@ -66,9 +66,15 @@ const ALL_MODERATION_STATES = [...MODERATION_STATES]
 // so the moderation-state matrix stays meaningful.
 const mkAccess = (view: BoardAccess['view'], segmentIds: string[] = []): BoardAccess => ({
   view,
+  vote: view,
   comment: view,
   submit: view,
-  segments: { view: segmentIds, comment: segmentIds, submit: segmentIds },
+  segments: {
+    view: segmentIds,
+    vote: segmentIds,
+    comment: segmentIds,
+    submit: segmentIds,
+  },
   approval: { posts: false, comments: false },
 })
 
@@ -367,9 +373,10 @@ describe('canCreatePost — board.approval.posts composes OR with workspace requ
   const adminAccess = (overrides: Partial<BoardAccess['approval']> = {}) => ({
     access: {
       view: 'anonymous' as AccessTier,
+      vote: 'anonymous' as AccessTier,
       comment: 'anonymous' as AccessTier,
       submit: 'anonymous' as AccessTier,
-      segments: { view: [], comment: [], submit: [] },
+      segments: { view: [], vote: [], comment: [], submit: [] },
       approval: { posts: false, comments: false, ...overrides },
     } satisfies BoardAccess,
   })
@@ -400,9 +407,10 @@ describe('canCreatePost — board.access.submit tier gates submission independen
     const board = {
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'anonymous',
         submit: 'team',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       } satisfies BoardAccess,
     }
@@ -413,9 +421,10 @@ describe('canCreatePost — board.access.submit tier gates submission independen
     const board = {
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'anonymous',
         submit: 'authenticated',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       } satisfies BoardAccess,
     }
@@ -426,9 +435,10 @@ describe('canCreatePost — board.access.submit tier gates submission independen
     const board = {
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'anonymous',
         submit: 'authenticated',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       } satisfies BoardAccess,
     }
@@ -439,9 +449,10 @@ describe('canCreatePost — board.access.submit tier gates submission independen
     const board = {
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'anonymous',
         submit: 'segments',
-        segments: { view: [], comment: [], submit: ['segment_x'] },
+        segments: { view: [], vote: [], comment: [], submit: ['segment_x'] },
         approval: { posts: false, comments: false },
       } satisfies BoardAccess,
     }
@@ -548,9 +559,10 @@ describe('canCreateComment — board.access.comment tier gates commenting indepe
     const board = {
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'authenticated',
         submit: 'authenticated',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       } satisfies BoardAccess,
     }
@@ -561,9 +573,10 @@ describe('canCreateComment — board.access.comment tier gates commenting indepe
     const board = {
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'team',
         submit: 'team',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       } satisfies BoardAccess,
     }
@@ -574,9 +587,10 @@ describe('canCreateComment — board.access.comment tier gates commenting indepe
     const board = {
       access: {
         view: 'team',
+        vote: 'team',
         comment: 'team',
         submit: 'team',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       } satisfies BoardAccess,
     }
@@ -587,9 +601,10 @@ describe('canCreateComment — board.access.comment tier gates commenting indepe
     const board = {
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'segments',
         submit: 'segments',
-        segments: { view: [], comment: ['segment_x'], submit: ['segment_x'] },
+        segments: { view: [], vote: [], comment: ['segment_x'], submit: ['segment_x'] },
         approval: { posts: false, comments: false },
       } satisfies BoardAccess,
     }
@@ -608,9 +623,10 @@ describe('canCreateComment — board.approval.comments composition', () => {
     const board = {
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'anonymous',
         submit: 'anonymous',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: true },
       } satisfies BoardAccess,
     }
@@ -624,9 +640,10 @@ describe('canCreateComment — board.approval.comments composition', () => {
     const board = {
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'anonymous',
         submit: 'anonymous',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: true },
       } satisfies BoardAccess,
     }
@@ -640,9 +657,10 @@ describe('canCreateComment — board.approval.comments composition', () => {
     const board = {
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'anonymous',
         submit: 'anonymous',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       } satisfies BoardAccess,
     }

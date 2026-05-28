@@ -43,16 +43,22 @@ const SEGMENT_ALPHA = createId('segment') as SegmentId
 const SEGMENT_BETA = createId('segment') as SegmentId
 
 function mkAccess(view: BoardAccess['view'], segmentIds: string[] = []): BoardAccess {
-  // Mirror BoardAccess invariants enforced on save: all three actions
-  // pinned to the same tier so parity reasoning stays simple. The view
-  // tier is the only knob this test cares about. Segments mirror the
-  // shared shape (same list across all three actions) so the parity
-  // matrix continues to express what the legacy shared-list shape did.
+  // Mirror BoardAccess invariants enforced on save: every action pinned
+  // to the same tier so parity reasoning stays simple. The view tier is
+  // the only knob this test cares about. Segments mirror the shared
+  // shape (same list across all four actions) so the parity matrix
+  // continues to express what the legacy shared-list shape did.
   return {
     view,
+    vote: view,
     comment: view,
     submit: view,
-    segments: { view: segmentIds, comment: segmentIds, submit: segmentIds },
+    segments: {
+      view: segmentIds,
+      vote: segmentIds,
+      comment: segmentIds,
+      submit: segmentIds,
+    },
     approval: { posts: false, comments: false },
   }
 }

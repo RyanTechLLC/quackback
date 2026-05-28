@@ -152,9 +152,10 @@ const BOARD_DEFAULT: BoardRow = {
   id: 'board_1',
   access: {
     view: 'anonymous',
+    vote: 'anonymous',
     comment: 'anonymous',
     submit: 'anonymous',
-    segments: { view: [], comment: [], submit: [] },
+    segments: { view: [], vote: [], comment: [], submit: [] },
     approval: { posts: false, comments: false },
   },
 }
@@ -174,9 +175,10 @@ describe('updateBoardAccessFn — accepts BoardAccess payload', () => {
         boardId: 'board_1',
         access: {
           view: 'anonymous',
+          vote: 'anonymous',
           comment: 'anonymous',
           submit: 'anonymous',
-          segments: { view: [], comment: [], submit: [] },
+          segments: { view: [], vote: [], comment: [], submit: [] },
           approval: { posts: false, comments: false },
         },
       },
@@ -191,9 +193,10 @@ describe('updateBoardAccessFn — accepts BoardAccess payload', () => {
           boardId: 'board_1',
           access: {
             view: 'authenticated',
+            vote: 'authenticated',
             comment: 'anonymous',
             submit: 'authenticated',
-            segments: { view: [], comment: [], submit: [] },
+            segments: { view: [], vote: [], comment: [], submit: [] },
             approval: { posts: false, comments: false },
           },
         },
@@ -208,9 +211,10 @@ describe('updateBoardAccessFn — accepts BoardAccess payload', () => {
           boardId: 'board_1',
           access: {
             view: 'segments',
+            vote: 'segments',
             comment: 'segments',
             submit: 'segments',
-            segments: { view: [], comment: [], submit: [] },
+            segments: { view: [], vote: [], comment: [], submit: [] },
             approval: { posts: false, comments: false },
           },
         },
@@ -223,9 +227,10 @@ describe('updateBoardAccessFn — writes access and emits audit event', () => {
   it('writes access to the boards row', async () => {
     const access = {
       view: 'authenticated' as const,
+      vote: 'authenticated' as const,
       comment: 'team' as const,
       submit: 'team' as const,
-      segments: { view: [], comment: [], submit: [] },
+      segments: { view: [], vote: [], comment: [], submit: [] },
       approval: { posts: true, comments: false },
     }
     await getUpdateBoardAccessFn()({ data: { boardId: 'board_1', access } })
@@ -238,9 +243,10 @@ describe('updateBoardAccessFn — writes access and emits audit event', () => {
   it('fires board.access.changed audit with before/after access', async () => {
     const access = {
       view: 'authenticated' as const,
+      vote: 'authenticated' as const,
       comment: 'team' as const,
       submit: 'team' as const,
-      segments: { view: [], comment: [], submit: [] },
+      segments: { view: [], vote: [], comment: [], submit: [] },
       approval: { posts: true, comments: false },
     }
     await getUpdateBoardAccessFn()({ data: { boardId: 'board_1', access } })
@@ -265,9 +271,10 @@ describe('updateBoardAccessFn — auth + not-found', () => {
           boardId: 'board_1',
           access: {
             view: 'anonymous',
+            vote: 'anonymous',
             comment: 'anonymous',
             submit: 'anonymous',
-            segments: { view: [], comment: [], submit: [] },
+            segments: { view: [], vote: [], comment: [], submit: [] },
             approval: { posts: false, comments: false },
           },
         },
@@ -290,9 +297,10 @@ describe('updateBoardAccessFn — auth + not-found', () => {
           boardId: 'board_1',
           access: {
             view: 'anonymous',
+            vote: 'anonymous',
             comment: 'anonymous',
             submit: 'anonymous',
-            segments: { view: [], comment: [], submit: [] },
+            segments: { view: [], vote: [], comment: [], submit: [] },
             approval: { posts: false, comments: false },
           },
         },
@@ -308,9 +316,10 @@ describe('updateBoardAccessFn — auth + not-found', () => {
           boardId: 'missing',
           access: {
             view: 'anonymous',
+            vote: 'anonymous',
             comment: 'anonymous',
             submit: 'anonymous',
-            segments: { view: [], comment: [], submit: [] },
+            segments: { view: [], vote: [], comment: [], submit: [] },
             approval: { posts: false, comments: false },
           },
         },

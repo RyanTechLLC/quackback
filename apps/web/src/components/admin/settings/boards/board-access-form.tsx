@@ -106,6 +106,12 @@ const TIERS: readonly TierMeta[] = [
   },
 ] as const
 
+// R1: BoardAccess gained `vote` as a first-class action. R3 will rebuild
+// this form as a 4-row matrix that exposes the new row in the UI. Until
+// then the form continues to treat view/comment/submit as the visible
+// rows and keeps `vote` synced to `view` on every write (preserves the
+// old "vote follows view" behaviour). The PresetMeta below specifies
+// vote explicitly so the matrix produces a fully-typed BoardAccess.
 interface ActionMeta {
   id: 'view' | 'comment' | 'submit'
   label: string
@@ -120,6 +126,7 @@ const ACTIONS: readonly ActionMeta[] = [
 ] as const
 
 type ActionId = (typeof ACTIONS)[number]['id']
+type AccessActionKey = ActionId | 'vote'
 type PresetName = 'public' | 'authenticated' | 'team' | 'custom'
 
 interface PresetMeta {
@@ -127,7 +134,7 @@ interface PresetMeta {
   label: string
   description: string
   icon: React.ComponentType<{ className?: string }>
-  tiers: Record<ActionId, AccessTier>
+  tiers: Record<AccessActionKey, AccessTier>
 }
 
 const PRESET_META: readonly PresetMeta[] = [
@@ -136,21 +143,33 @@ const PRESET_META: readonly PresetMeta[] = [
     label: 'Public',
     description: 'Anyone can view, vote, comment, and submit.',
     icon: GlobeAltIcon,
-    tiers: { view: 'anonymous', comment: 'anonymous', submit: 'anonymous' },
+    // R1 leaves vote slotted to match view — R3 introduces the modern
+    // "Public" preset that bumps vote to 'authenticated'.
+    tiers: {
+      view: 'anonymous',
+      vote: 'anonymous',
+      comment: 'anonymous',
+      submit: 'anonymous',
+    },
   },
   {
     id: 'authenticated',
     label: 'Auth only',
     description: 'Signed-in users can view, vote, comment, and submit.',
     icon: UsersIcon,
-    tiers: { view: 'authenticated', comment: 'authenticated', submit: 'authenticated' },
+    tiers: {
+      view: 'authenticated',
+      vote: 'authenticated',
+      comment: 'authenticated',
+      submit: 'authenticated',
+    },
   },
   {
     id: 'team',
     label: 'Team only',
     description: 'Only workspace members can view, vote, comment, and submit.',
     icon: LockClosedIcon,
-    tiers: { view: 'team', comment: 'team', submit: 'team' },
+    tiers: { view: 'team', vote: 'team', comment: 'team', submit: 'team' },
   },
 ] as const
 
@@ -190,10 +209,11 @@ function applyPreset(meta: PresetMeta, current: FormShape): FormShape {
   return {
     ...current,
     view: meta.tiers.view,
+    vote: meta.tiers.vote,
     comment: meta.tiers.comment,
     submit: meta.tiers.submit,
     // Presets always clear segment lists — they target non-segments tiers.
-    segments: { view: [], comment: [], submit: [] },
+    segments: { view: [], vote: [], comment: [], submit: [] },
     // Approval is preserved (UI doesn't expose it).
   }
 }
@@ -297,6 +317,11 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
       // no existing selection.
       const cascadedToSegments: ActionId[] = []
       if (actionId === 'view') {
+        // R1: vote isn't exposed in the matrix yet (R3 owns that). Keep
+        // it pinned to view + view's segments so existing boards behave
+        // exactly as before.
+        form.setValue('vote', tierId, { shouldDirty: true })
+        form.setValue('segments.vote', values.segments.view, { shouldDirty: true })
         const vRank = ACCESS_TIER_RANK[tierId]
         if (ACCESS_TIER_RANK[values.comment] < vRank) {
           form.setValue('comment', tierId, { shouldDirty: true })
@@ -331,6 +356,11 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
   const handleSegsChange = useCallback(
     (actionId: ActionId, ids: string[]) => {
       form.setValue(`segments.${actionId}`, ids, { shouldDirty: true })
+      // R1: keep segments.vote pinned to segments.view while the matrix
+      // doesn't expose a vote row. R3 will let users diverge them.
+      if (actionId === 'view') {
+        form.setValue('segments.vote', ids, { shouldDirty: true })
+      }
     },
     [form]
   )

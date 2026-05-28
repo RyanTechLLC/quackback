@@ -73,9 +73,15 @@ const actors: Record<string, Actor> = {
 function mkAccess(view: AccessTier, segmentIds: string[] = []): BoardAccess {
   return {
     view,
+    vote: view,
     comment: view,
     submit: view,
-    segments: { view: segmentIds, comment: segmentIds, submit: segmentIds },
+    segments: {
+      view: segmentIds,
+      vote: segmentIds,
+      comment: segmentIds,
+      submit: segmentIds,
+    },
     approval: { posts: false, comments: false },
   }
 }

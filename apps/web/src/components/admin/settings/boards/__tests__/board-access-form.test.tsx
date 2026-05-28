@@ -108,9 +108,10 @@ describe('<BoardAccessForm> presets', () => {
   it('detects Custom when access has any divergence', () => {
     renderForm({
       view: 'anonymous',
+      vote: 'anonymous',
       comment: 'authenticated',
       submit: 'authenticated',
-      segments: { view: [], comment: [], submit: [] },
+      segments: { view: [], vote: [], comment: [], submit: [] },
       approval: { posts: false, comments: false },
     })
     // Matrix is visible (in Custom mode)
@@ -127,9 +128,10 @@ describe('<BoardAccessForm> presets', () => {
   it('clicking a non-Custom preset hides the matrix again', () => {
     renderForm({
       view: 'anonymous',
+      vote: 'anonymous',
       comment: 'authenticated',
       submit: 'authenticated',
-      segments: { view: [], comment: [], submit: [] },
+      segments: { view: [], vote: [], comment: [], submit: [] },
       approval: { posts: false, comments: false },
     })
     expect(screen.getByRole('button', { name: 'View & vote: Anyone' })).toBeInTheDocument()
@@ -147,9 +149,10 @@ describe('<BoardAccessForm> matrix', () => {
     renderForm(
       access ?? {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'authenticated',
         submit: 'authenticated',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       }
     )
@@ -165,9 +168,10 @@ describe('<BoardAccessForm> matrix', () => {
   it('disables Comment/Submit cells with rank below View', () => {
     renderInCustom({
       view: 'team',
+      vote: 'team',
       comment: 'team',
       submit: 'team',
-      segments: { view: [], comment: [], submit: [] },
+      segments: { view: [], vote: [], comment: [], submit: [] },
       approval: { posts: false, comments: false },
     })
     // We're in Custom mode now via the divergence — actually team-all matches
@@ -187,9 +191,10 @@ describe('<BoardAccessForm> matrix', () => {
     // Click Custom to reveal it before clicking cells.
     renderInCustom({
       view: 'anonymous',
+      vote: 'anonymous',
       comment: 'anonymous',
       submit: 'anonymous',
-      segments: { view: [], comment: [], submit: [] },
+      segments: { view: [], vote: [], comment: [], submit: [] },
       approval: { posts: false, comments: false },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Custom' }))
@@ -214,9 +219,10 @@ describe('<BoardAccessForm> save', () => {
   it('Save dock surfaces once the form is dirty', () => {
     renderForm({
       view: 'anonymous',
+      vote: 'anonymous',
       comment: 'authenticated',
       submit: 'authenticated',
-      segments: { view: [], comment: [], submit: [] },
+      segments: { view: [], vote: [], comment: [], submit: [] },
       approval: { posts: false, comments: false },
     })
     // Toggle a cell to dirty the form
@@ -228,9 +234,10 @@ describe('<BoardAccessForm> save', () => {
   it('disables Save when any action is on segments tier with empty list', () => {
     renderForm({
       view: 'segments',
+      vote: 'segments',
       comment: 'segments',
       submit: 'segments',
-      segments: { view: [], comment: [], submit: [] },
+      segments: { view: [], vote: [], comment: [], submit: [] },
       approval: { posts: false, comments: false },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Custom' }))
@@ -249,9 +256,10 @@ describe('<BoardAccessForm> save', () => {
   it('submits the BoardAccess payload with the per-action segments shape', async () => {
     renderForm({
       view: 'anonymous',
+      vote: 'anonymous',
       comment: 'authenticated',
       submit: 'authenticated',
-      segments: { view: [], comment: [], submit: [] },
+      segments: { view: [], vote: [], comment: [], submit: [] },
       approval: { posts: true, comments: false },
     })
     // Form starts in Custom mode (divergence). Mark dirty by toggling Comment.
@@ -276,9 +284,10 @@ describe('<BoardAccessForm> save', () => {
   it('Discard restores the original access', async () => {
     renderForm({
       view: 'anonymous',
+      vote: 'anonymous',
       comment: 'authenticated',
       submit: 'authenticated',
-      segments: { view: [], comment: [], submit: [] },
+      segments: { view: [], vote: [], comment: [], submit: [] },
       approval: { posts: false, comments: false },
     })
     clickTierCell('Comment', 'Team only')
@@ -297,9 +306,15 @@ describe('<BoardAccessForm> preset segments cleanup', () => {
   it('clicking a non-segments preset clears stale segment selections', async () => {
     renderForm({
       view: 'segments',
+      vote: 'segments',
       comment: 'segments',
       submit: 'segments',
-      segments: { view: ['seg_alpha'], comment: ['seg_alpha'], submit: ['seg_alpha'] },
+      segments: {
+        view: ['seg_alpha'],
+        vote: ['seg_alpha'],
+        comment: ['seg_alpha'],
+        submit: ['seg_alpha'],
+      },
       approval: { posts: false, comments: false },
     })
     // Form is in Custom (no preset matches segments-all with non-empty lists).
@@ -309,7 +324,7 @@ describe('<BoardAccessForm> preset segments cleanup', () => {
       expect(mutate).toHaveBeenCalledWith(
         expect.objectContaining({
           access: expect.objectContaining({
-            segments: { view: [], comment: [], submit: [] },
+            segments: { view: [], vote: [], comment: [], submit: [] },
           }),
         })
       )

@@ -32,13 +32,15 @@ export type DeleteBoardInput = z.infer<typeof deleteBoardSchema>
 const tierSchema = z.enum(ACCESS_TIERS)
 
 /**
- * Validation for the per-action `BoardAccess` payload (view/comment/submit
- * + per-action segments + approval). Enforces the spec's tier-rank
- * invariants so a board can't accidentally land in a contradictory state
- * (e.g. anonymous comments on a team-only-visible board).
+ * Validation for the per-action `BoardAccess` payload
+ * (view/vote/comment/submit + per-action segments + approval). Enforces
+ * the spec's tier-rank invariants so a board can't accidentally land in
+ * a contradictory state (e.g. anonymous voting on a team-only-visible
+ * board).
  *
  * Invariants:
- *  - `comment.rank >= view.rank` (can't be more permissive than view)
+ *  - `vote.rank >= view.rank` (can't be more permissive than view)
+ *  - `comment.rank >= view.rank`
  *  - `submit.rank >= view.rank`
  *  - For each action, if its tier is `'segments'`, the matching
  *    `segments[action]` array must be non-empty (an empty allowlist
@@ -48,10 +50,12 @@ const tierSchema = z.enum(ACCESS_TIERS)
 export const boardAccessSchema = z
   .object({
     view: tierSchema,
+    vote: tierSchema,
     comment: tierSchema,
     submit: tierSchema,
     segments: z.object({
       view: z.array(z.string()).max(50, 'At most 50 segments per board.'),
+      vote: z.array(z.string()).max(50, 'At most 50 segments per board.'),
       comment: z.array(z.string()).max(50, 'At most 50 segments per board.'),
       submit: z.array(z.string()).max(50, 'At most 50 segments per board.'),
     }),
@@ -61,6 +65,13 @@ export const boardAccessSchema = z
     }),
   })
   .superRefine((val, ctx) => {
+    if (ACCESS_TIER_RANK[val.vote] < ACCESS_TIER_RANK[val.view]) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['vote'],
+        message: 'Vote tier cannot be more permissive than view.',
+      })
+    }
     if (ACCESS_TIER_RANK[val.comment] < ACCESS_TIER_RANK[val.view]) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -76,7 +87,7 @@ export const boardAccessSchema = z
       })
     }
     // Per-action segments-non-empty when that action is set to 'segments'.
-    for (const action of ['view', 'comment', 'submit'] as const) {
+    for (const action of ['view', 'vote', 'comment', 'submit'] as const) {
       if (val[action] === 'segments' && val.segments[action].length === 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

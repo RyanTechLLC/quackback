@@ -359,10 +359,12 @@ export const toggleVoteFn = createServerFn({ method: 'POST' })
         const ctx = await requireAuth()
         // Per-post audience gate: portal-access alone is not enough — an
         // authenticated caller could still vote on a team-only / segment-
-        // restricted post if they knew the id. Treat denials as 404.
-        const { assertPostViewable } = await import('@/lib/server/domains/posts/post.access')
+        // restricted post if they knew the id. `assertPostVotable`
+        // composes view (404 on deny) + the per-board vote tier
+        // (403 on "viewable but not votable").
+        const { assertPostVotable } = await import('@/lib/server/domains/posts/post.access')
         const actor = await policyActorFromAuth(ctx)
-        await assertPostViewable(data.postId as PostId, actor)
+        await assertPostVotable(data.postId as PostId, actor)
 
         // Block anonymous users unless anonymousVoting is enabled
         if (ctx.principal.type === 'anonymous') {

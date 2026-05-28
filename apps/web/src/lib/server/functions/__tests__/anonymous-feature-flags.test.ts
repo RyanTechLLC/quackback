@@ -76,6 +76,7 @@ vi.mock('@/lib/server/domains/posts/post.voting', () => ({
 // anonymous-feature-flag tests stay focused on what they assert.
 vi.mock('@/lib/server/domains/posts/post.access', () => ({
   assertPostViewable: vi.fn().mockResolvedValue(undefined),
+  assertPostVotable: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('@/lib/server/utils/anon-rate-limit', () => ({

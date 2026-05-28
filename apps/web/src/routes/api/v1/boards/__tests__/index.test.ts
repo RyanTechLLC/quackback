@@ -59,9 +59,10 @@ const CREATED_BOARD = {
   description: null,
   access: {
     view: 'anonymous',
+    vote: 'anonymous',
     comment: 'anonymous',
     submit: 'anonymous',
-    segments: { view: [], comment: [], submit: [] },
+    segments: { view: [], vote: [], comment: [], submit: [] },
     approval: { posts: false, comments: false },
   },
   createdAt: new Date(),

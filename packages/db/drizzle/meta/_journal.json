@@ -575,6 +575,13 @@
       "when": 1779667200000,
       "tag": "0081_per_action_segments",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1779753600000,
+      "tag": "0082_board_access_vote_action",
+      "breakpoints": true
     }
   ]
 }

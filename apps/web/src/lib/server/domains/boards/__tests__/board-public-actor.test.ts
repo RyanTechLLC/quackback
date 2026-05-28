@@ -53,9 +53,10 @@ describe('getPublicBoardById — defensive policy check', () => {
       id: 'brd_team' as BoardId,
       access: {
         view: 'team',
+        vote: 'team',
         comment: 'team',
         submit: 'team',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       },
     })
@@ -69,9 +70,10 @@ describe('getPublicBoardById — defensive policy check', () => {
       id: 'brd_team' as BoardId,
       access: {
         view: 'team',
+        vote: 'team',
         comment: 'team',
         submit: 'team',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       },
     })
@@ -85,9 +87,15 @@ describe('getPublicBoardById — defensive policy check', () => {
       id: 'brd_seg' as BoardId,
       access: {
         view: 'segments',
+        vote: 'segments',
         comment: 'segments',
         submit: 'segments',
-        segments: { view: ['seg_alpha'], comment: ['seg_alpha'], submit: ['seg_alpha'] },
+        segments: {
+          view: ['seg_alpha'],
+          vote: ['seg_alpha'],
+          comment: ['seg_alpha'],
+          submit: ['seg_alpha'],
+        },
         approval: { posts: false, comments: false },
       },
     })
@@ -101,9 +109,15 @@ describe('getPublicBoardById — defensive policy check', () => {
       id: 'brd_seg' as BoardId,
       access: {
         view: 'segments',
+        vote: 'segments',
         comment: 'segments',
         submit: 'segments',
-        segments: { view: ['seg_alpha'], comment: ['seg_alpha'], submit: ['seg_alpha'] },
+        segments: {
+          view: ['seg_alpha'],
+          vote: ['seg_alpha'],
+          comment: ['seg_alpha'],
+          submit: ['seg_alpha'],
+        },
         approval: { posts: false, comments: false },
       },
     })
@@ -133,9 +147,10 @@ describe('getPublicBoardById — defensive policy check', () => {
       id: 'brd_x' as BoardId,
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'anonymous',
         submit: 'anonymous',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       },
     })

@@ -62,9 +62,10 @@ vi.mock('@/lib/server/db', async () => {
             name: 'Feedback',
             access: {
               view: 'anonymous',
+              vote: 'anonymous',
               comment: 'anonymous',
               submit: 'anonymous',
-              segments: { view: [], comment: [], submit: [] },
+              segments: { view: [], vote: [], comment: [], submit: [] },
               approval: { posts: false, comments: false },
             },
           }),
@@ -200,9 +201,10 @@ describe('createPost held audit event', () => {
       name: 'Feedback',
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'anonymous',
         submit: 'anonymous',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       },
     } as unknown as Awaited<ReturnType<typeof db.query.boards.findFirst>>)
@@ -247,9 +249,10 @@ describe('createPost held audit event', () => {
       name: 'Feedback',
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'anonymous',
         submit: 'anonymous',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       },
     } as unknown as Awaited<ReturnType<typeof db.query.boards.findFirst>>)
@@ -298,9 +301,10 @@ describe('createPost dispatch guard (moderation)', () => {
       name: 'Feedback',
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'anonymous',
         submit: 'anonymous',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       },
     } as unknown as Awaited<ReturnType<typeof db.query.boards.findFirst>>)
@@ -336,9 +340,10 @@ describe('createPost dispatch guard (moderation)', () => {
       name: 'Feedback',
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'anonymous',
         submit: 'anonymous',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       },
     } as unknown as Awaited<ReturnType<typeof db.query.boards.findFirst>>)
@@ -374,9 +379,10 @@ describe('createPost dispatch guard (moderation)', () => {
       name: 'Feedback',
       access: {
         view: 'anonymous',
+        vote: 'anonymous',
         comment: 'anonymous',
         submit: 'anonymous',
-        segments: { view: [], comment: [], submit: [] },
+        segments: { view: [], vote: [], comment: [], submit: [] },
         approval: { posts: false, comments: false },
       },
     } as unknown as Awaited<ReturnType<typeof db.query.boards.findFirst>>)
