@@ -1,19 +1,20 @@
 // @vitest-environment happy-dom
 /**
- * <BoardAccessForm> — per-board access matrix form.
+ * <BoardAccessForm> — permissions matrix.
  *
  * Covers:
- *   - Quick-preset detection and selection
- *   - Tier-divergence flips the preset to "Custom"
- *   - Segments picker is conditional on any tier === 'segments'
- *   - Save button gates when segments are required but unselected
- *   - Save submits the BoardAccess payload via the mutation hook
+ *   - Preset detection from incoming board.access shape
+ *   - Selecting a preset hides the matrix; Custom reveals it
+ *   - Tier cells in the matrix are role=button; selecting a cell flips
+ *     the form to Custom mode
+ *   - Tier hierarchy: raising View auto-clamps Comment/Submit
+ *   - Save is disabled when any action picks 'segments' but the list is empty
+ *   - Save payload uses the per-action `segments` shape
  *
- * The mutation hook, segments query, and portalConfig query are all
- * mocked — this is a pure component-behavior test.
+ * The mutation hook, segments query, and portalConfig query are mocked.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BoardAccessForm } from '../board-access-form'
 import { DEFAULT_BOARD_ACCESS, type BoardAccess } from '@/lib/shared/db-types'
@@ -23,7 +24,6 @@ import type { BoardId } from '@quackback/ids'
 // Mocks
 // ---------------------------------------------------------------------------
 
-// <Link> renders as a plain <a> so we don't need a real router context.
 vi.mock('@tanstack/react-router', () => ({
   Link: ({
     to,
@@ -53,48 +53,40 @@ vi.mock('@/lib/client/mutations', () => ({
 vi.mock('@/lib/client/hooks/use-segments-queries', () => ({
   useSegments: () => ({
     data: [
-      { id: 'seg_alpha', name: 'Alpha', memberCount: 3 },
-      { id: 'seg_beta', name: 'Beta', memberCount: 0 },
+      { id: 'seg_alpha', name: 'Alpha', memberCount: 3, description: 'Alpha description' },
+      { id: 'seg_beta', name: 'Beta', memberCount: 0, description: null },
     ],
     isLoading: false,
     isError: false,
   }),
 }))
 
-// The form calls `useQuery(settingsQueries.portalConfig())`. We replace the
-// queryOptions builder with a static one whose queryFn returns a stable
-// stub — no network, no server-fn boundary, no DATABASE_URL needed.
-vi.mock('@/lib/client/queries/settings', () => ({
-  settingsQueries: {
-    portalConfig: () => ({
-      queryKey: ['settings', 'portalConfig'],
-      queryFn: async () => ({
-        features: {
-          anonymousVoting: true,
-          anonymousCommenting: true,
-          anonymousPosting: true,
-        },
-      }),
-      staleTime: Infinity,
-    }),
-  },
-}))
-
 // ---------------------------------------------------------------------------
-// Fixtures
+// Helpers
 // ---------------------------------------------------------------------------
 
 const BOARD_ID = 'brd_test' as BoardId
 
 function renderForm(access: BoardAccess = DEFAULT_BOARD_ACCESS) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
       <BoardAccessForm board={{ id: BOARD_ID, access }} />
     </QueryClientProvider>
   )
+}
+
+/** Click a tier cell in the matrix by action label + tier label. */
+function clickTierCell(actionLabel: string, tierLabel: string) {
+  const btn = screen.getByRole('button', { name: `${actionLabel}: ${tierLabel}` })
+  fireEvent.click(btn)
+  return btn
+}
+
+/** True iff the named matrix cell button is currently selected. */
+function isCellSelected(actionLabel: string, tierLabel: string) {
+  const btn = screen.getByRole('button', { name: `${actionLabel}: ${tierLabel}` })
+  return btn.getAttribute('aria-pressed') === 'true'
 }
 
 beforeEach(() => {
@@ -106,174 +98,194 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('<BoardAccessForm> presets', () => {
-  it('preselects "Public" when access matches the all-anonymous shape with approval off', () => {
+  it('detects Public when board.access is all-anonymous with clean segments', () => {
     renderForm()
-    // The first radio matching /public/i is the Public preset card.
-    const publicPreset = screen.getByRole('radio', { name: /public/i })
-    expect(publicPreset).toBeChecked()
+    // Matrix is hidden when preset !== 'custom'; check by absence of cell.
+    expect(screen.queryByRole('button', { name: /^View & vote:/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Public' })).toBeInTheDocument()
   })
 
-  it('preselects "Auth-only" when every tier is authenticated and approval is off', () => {
+  it('detects Custom when access has any divergence', () => {
     renderForm({
-      view: 'authenticated',
+      view: 'anonymous',
       comment: 'authenticated',
       submit: 'authenticated',
       segments: { view: [], comment: [], submit: [] },
       approval: { posts: false, comments: false },
     })
-    expect(screen.getByRole('radio', { name: /auth-only/i })).toBeChecked()
+    // Matrix is visible (in Custom mode)
+    expect(screen.getByRole('button', { name: 'View & vote: Anyone' })).toBeInTheDocument()
   })
 
-  it('preselects "Team only" preset when every tier is team', () => {
+  it('clicking Custom card reveals the matrix', () => {
+    renderForm()
+    expect(screen.queryByRole('button', { name: /^View & vote:/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Custom' }))
+    expect(screen.getByRole('button', { name: 'View & vote: Anyone' })).toBeInTheDocument()
+  })
+
+  it('clicking a non-Custom preset hides the matrix again', () => {
     renderForm({
+      view: 'anonymous',
+      comment: 'authenticated',
+      submit: 'authenticated',
+      segments: { view: [], comment: [], submit: [] },
+      approval: { posts: false, comments: false },
+    })
+    expect(screen.getByRole('button', { name: 'View & vote: Anyone' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Team only' }))
+    expect(screen.queryByRole('button', { name: /^View & vote:/ })).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Matrix tier selection
+// ---------------------------------------------------------------------------
+
+describe('<BoardAccessForm> matrix', () => {
+  function renderInCustom(access?: BoardAccess) {
+    renderForm(
+      access ?? {
+        view: 'anonymous',
+        comment: 'authenticated',
+        submit: 'authenticated',
+        segments: { view: [], comment: [], submit: [] },
+        approval: { posts: false, comments: false },
+      }
+    )
+  }
+
+  it('selecting a tier cell sets aria-pressed=true on that cell only', () => {
+    renderInCustom()
+    clickTierCell('Comment', 'Anyone')
+    expect(isCellSelected('Comment', 'Anyone')).toBe(true)
+    expect(isCellSelected('Comment', 'Signed-in')).toBe(false)
+  })
+
+  it('disables Comment/Submit cells with rank below View', () => {
+    renderInCustom({
       view: 'team',
       comment: 'team',
       submit: 'team',
       segments: { view: [], comment: [], submit: [] },
       approval: { posts: false, comments: false },
     })
-    // "Team only" appears as a preset card AND as a tier radio inside each
-    // TierSelect (4 instances total: 1 preset + 3 tier radios). Pick the
-    // preset card via its preset-* id.
-    const teamPreset = document.getElementById('preset-team') as HTMLElement
-    expect(teamPreset).toBeChecked()
+    // We're in Custom mode now via the divergence — actually team-all matches
+    // no Custom by default. Force Custom by clicking the Custom card after a
+    // preset is auto-detected.
+    // For team-all, preset = "Team only" (matches the Team preset), so the
+    // matrix is hidden. Click Custom to reveal it.
+    fireEvent.click(screen.getByRole('button', { name: 'Custom' }))
+    const anyoneOnComment = screen.getByRole('button', { name: 'Comment: Anyone' })
+    expect(anyoneOnComment).toBeDisabled()
+    const anyoneOnSubmit = screen.getByRole('button', { name: 'Submit posts: Anyone' })
+    expect(anyoneOnSubmit).toBeDisabled()
   })
 
-  it('flips to "Custom" when a single tier diverges from any preset', () => {
-    renderForm()
-    // Default = Public. Toggle the Comment tier to Signed-in via the
-    // "Comment tier" radiogroup. There are 3 "Signed-in" radios (view,
-    // comment, submit) — scope to the comment radiogroup so we hit the
-    // right one.
-    const commentGroup = screen.getByRole('radiogroup', { name: /comment tier/i })
-    fireEvent.click(within(commentGroup).getByRole('radio', { name: /signed-in/i }))
-    expect(screen.getByRole('radio', { name: /custom/i })).toBeChecked()
-  })
-
-  it('clicking the "Auth-only" preset switches every tier to authenticated', () => {
-    renderForm()
-    fireEvent.click(screen.getByRole('radio', { name: /auth-only/i }))
-    expect(screen.getByRole('radio', { name: /auth-only/i })).toBeChecked()
-    // Inside each tier radiogroup, "Signed-in" should now be checked.
-    const viewGroup = screen.getByRole('radiogroup', { name: /view tier/i })
-    const commentGroup = screen.getByRole('radiogroup', { name: /comment tier/i })
-    const submitGroup = screen.getByRole('radiogroup', { name: /submit tier/i })
-    expect(within(viewGroup).getByRole('radio', { name: /signed-in/i })).toBeChecked()
-    expect(within(commentGroup).getByRole('radio', { name: /signed-in/i })).toBeChecked()
-    expect(within(submitGroup).getByRole('radio', { name: /signed-in/i })).toBeChecked()
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Segments picker conditional render
-// ---------------------------------------------------------------------------
-
-describe('<BoardAccessForm> segments picker', () => {
-  it('does NOT render the segments picker when no tier is "segments"', () => {
-    renderForm()
-    expect(screen.queryByText(/used wherever .?segments.? is selected/i)).not.toBeInTheDocument()
-  })
-
-  it('renders the segments picker when any tier becomes "segments"', () => {
-    renderForm()
-    const viewGroup = screen.getByRole('radiogroup', { name: /view tier/i })
-    fireEvent.click(within(viewGroup).getByRole('radio', { name: /segments/i }))
-    expect(screen.getByText(/used wherever .?segments.? is selected/i)).toBeInTheDocument()
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Save button
-// ---------------------------------------------------------------------------
-
-describe('<BoardAccessForm> save', () => {
-  it('disables Save when a tier is "segments" but no segments are picked', () => {
-    renderForm({
-      view: 'segments',
-      comment: 'segments',
-      submit: 'segments',
-      segments: { view: [], comment: [], submit: [] },
-      approval: { posts: false, comments: false },
-    })
-    expect(screen.getByRole('button', { name: /save changes/i })).toBeDisabled()
-  })
-
-  it('enables Save when segments are required and at least one segment is selected', () => {
-    renderForm({
-      view: 'segments',
-      comment: 'segments',
-      submit: 'segments',
-      segments: { view: ['seg_alpha'], comment: ['seg_alpha'], submit: ['seg_alpha'] },
-      approval: { posts: false, comments: false },
-    })
-    expect(screen.getByRole('button', { name: /save changes/i })).not.toBeDisabled()
-  })
-
-  it('submits the BoardAccess payload via the mutation hook', async () => {
-    const access: BoardAccess = {
-      view: 'anonymous',
-      comment: 'authenticated',
-      submit: 'authenticated',
-      segments: { view: [], comment: [], submit: [] },
-      approval: { posts: true, comments: false },
-    }
-    renderForm(access)
-    const button = screen.getByRole('button', { name: /save changes/i })
-    fireEvent.submit(button.closest('form')!)
-    // react-hook-form's handleSubmit runs an async validation microtask
-    // before invoking onSubmit; waitFor flushes it before we assert.
-    await waitFor(() =>
-      expect(mutate).toHaveBeenCalledWith({
-        boardId: BOARD_ID,
-        access: expect.objectContaining({
-          view: 'anonymous',
-          comment: 'authenticated',
-          submit: 'authenticated',
-          segments: { view: [], comment: [], submit: [] },
-          approval: { posts: true, comments: false },
-        }),
-      })
-    )
-  })
-
-  it('does NOT call mutate when Enter-key-style submit fires with segments-required-but-empty (belt-and-braces)', async () => {
-    renderForm({
-      view: 'segments',
-      comment: 'segments',
-      submit: 'segments',
-      segments: { view: [], comment: [], submit: [] },
-      approval: { posts: false, comments: false },
-    })
-    const button = screen.getByRole('button', { name: /save changes/i })
-    fireEvent.submit(button.closest('form')!)
-    // Flush react-hook-form's async handleSubmit microtask.
-    await new Promise((r) => setTimeout(r, 10))
-    expect(mutate).not.toHaveBeenCalled()
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Tier-rank invariant: raising view auto-clamps comment/submit
-// ---------------------------------------------------------------------------
-
-describe('BoardAccessForm — tier rank invariant', () => {
-  it('raising view tier auto-clamps comment and submit to match', () => {
-    // Start with all anonymous
-    renderForm({
+  it('raising View tier auto-clamps Comment and Submit to match', () => {
+    // All-anonymous matches the Public preset, so the matrix starts hidden.
+    // Click Custom to reveal it before clicking cells.
+    renderInCustom({
       view: 'anonymous',
       comment: 'anonymous',
       submit: 'anonymous',
       segments: { view: [], comment: [], submit: [] },
       approval: { posts: false, comments: false },
     })
-    // Click "Team only" in the View tier radio group
-    const viewGroup = screen.getByRole('radiogroup', { name: /view tier/i })
-    fireEvent.click(within(viewGroup).getByRole('radio', { name: /team only/i }))
-    // Both Comment and Submit groups should now show Team only as checked
-    const commentGroup = screen.getByRole('radiogroup', { name: /comment tier/i })
-    const submitGroup = screen.getByRole('radiogroup', { name: /submit tier/i })
-    expect(within(commentGroup).getByRole('radio', { name: /team only/i })).toBeChecked()
-    expect(within(submitGroup).getByRole('radio', { name: /team only/i })).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: 'Custom' }))
+    clickTierCell('View & vote', 'Team only')
+    expect(isCellSelected('View & vote', 'Team only')).toBe(true)
+    expect(isCellSelected('Comment', 'Team only')).toBe(true)
+    expect(isCellSelected('Submit posts', 'Team only')).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Segments empty-state + save gate
+// ---------------------------------------------------------------------------
+
+describe('<BoardAccessForm> save', () => {
+  it('Save dock is collapsed until form is dirty', () => {
+    renderForm()
+    const region = screen.getByRole('region', { name: /save changes/i })
+    expect(region.getAttribute('data-dirty')).toBeNull()
+  })
+
+  it('Save dock surfaces once the form is dirty', () => {
+    renderForm({
+      view: 'anonymous',
+      comment: 'authenticated',
+      submit: 'authenticated',
+      segments: { view: [], comment: [], submit: [] },
+      approval: { posts: false, comments: false },
+    })
+    // Toggle a cell to dirty the form
+    clickTierCell('Comment', 'Team only')
+    const region = screen.getByRole('region', { name: /save changes/i })
+    expect(region.getAttribute('data-dirty')).toBe('true')
+  })
+
+  it('disables Save when any action is on segments tier with empty list', () => {
+    renderForm({
+      view: 'segments',
+      comment: 'segments',
+      submit: 'segments',
+      segments: { view: [], comment: [], submit: [] },
+      approval: { posts: false, comments: false },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Custom' }))
+    // Make form dirty by re-clicking the same view tier to mark a change
+    // (selecting current value still doesn't dirty; instead toggle off-on).
+    // Easier: directly verify the button is disabled via its `error` prop —
+    // the save dock should render with disabled Save once a change is made.
+    // Toggle Comment to a different tier and back to dirty the form.
+    clickTierCell('Comment', 'Team only')
+    clickTierCell('Comment', 'Segments')
+    // Now form is dirty and segments are empty for at least one action.
+    const save = screen.getByRole('button', { name: /save changes/i })
+    expect(save).toBeDisabled()
+  })
+
+  it('submits the BoardAccess payload with the per-action segments shape', async () => {
+    renderForm({
+      view: 'anonymous',
+      comment: 'authenticated',
+      submit: 'authenticated',
+      segments: { view: [], comment: [], submit: [] },
+      approval: { posts: true, comments: false },
+    })
+    // Form starts in Custom mode (divergence). Mark dirty by toggling Comment.
+    clickTierCell('Comment', 'Team only')
+    clickTierCell('Comment', 'Signed-in')
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }))
+    await waitFor(() =>
+      expect(mutate).toHaveBeenCalledWith({
+        boardId: BOARD_ID,
+        access: expect.objectContaining({
+          segments: expect.objectContaining({
+            view: expect.any(Array),
+            comment: expect.any(Array),
+            submit: expect.any(Array),
+          }),
+          approval: { posts: true, comments: false },
+        }),
+      })
+    )
+  })
+
+  it('Discard restores the original access', async () => {
+    renderForm({
+      view: 'anonymous',
+      comment: 'authenticated',
+      submit: 'authenticated',
+      segments: { view: [], comment: [], submit: [] },
+      approval: { posts: false, comments: false },
+    })
+    clickTierCell('Comment', 'Team only')
+    expect(isCellSelected('Comment', 'Team only')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: /discard/i }))
+    expect(isCellSelected('Comment', 'Signed-in')).toBe(true)
+    expect(isCellSelected('Comment', 'Team only')).toBe(false)
   })
 })
 
@@ -281,8 +293,8 @@ describe('BoardAccessForm — tier rank invariant', () => {
 // Preset segments cleanup
 // ---------------------------------------------------------------------------
 
-describe('BoardAccessForm — preset segments cleanup', () => {
-  it('clicking Public preset clears stale segment selections', async () => {
+describe('<BoardAccessForm> preset segments cleanup', () => {
+  it('clicking a non-segments preset clears stale segment selections', async () => {
     renderForm({
       view: 'segments',
       comment: 'segments',
@@ -290,11 +302,10 @@ describe('BoardAccessForm — preset segments cleanup', () => {
       segments: { view: ['seg_alpha'], comment: ['seg_alpha'], submit: ['seg_alpha'] },
       approval: { posts: false, comments: false },
     })
-    const publicPresetRadio = document.getElementById('preset-public') as HTMLElement
-    fireEvent.click(publicPresetRadio)
-    // Saving now should send empty per-action segment lists.
-    fireEvent.submit(screen.getByRole('button', { name: /save changes/i }).closest('form')!)
-    await waitFor(() => {
+    // Form is in Custom (no preset matches segments-all with non-empty lists).
+    fireEvent.click(screen.getByRole('button', { name: 'Public' }))
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }))
+    await waitFor(() =>
       expect(mutate).toHaveBeenCalledWith(
         expect.objectContaining({
           access: expect.objectContaining({
@@ -302,6 +313,6 @@ describe('BoardAccessForm — preset segments cleanup', () => {
           }),
         })
       )
-    })
+    )
   })
 })

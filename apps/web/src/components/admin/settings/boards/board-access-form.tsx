@@ -1,31 +1,37 @@
-import { useEffect, useMemo } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react'
+import { createPortal } from 'react-dom'
 import { useForm } from 'react-hook-form'
 import { Link } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
 import {
-  ExclamationTriangleIcon,
+  ChatBubbleLeftIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  EyeIcon,
   GlobeAltIcon,
+  InformationCircleIcon,
   LockClosedIcon,
+  MagnifyingGlassIcon,
+  PaperAirplaneIcon,
+  PencilSquareIcon,
+  PlusIcon,
   ShieldCheckIcon,
+  TagIcon,
   UsersIcon,
 } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { FormError } from '@/components/shared/form-error'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Label } from '@/components/ui/label'
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-} from '@/components/ui/form'
-import { SegmentMultiSelect } from '@/components/admin/segments/segment-multi-select'
 import { useUpdateBoardAccess } from '@/lib/client/mutations'
 import { useSegments } from '@/lib/client/hooks/use-segments-queries'
-import { settingsQueries } from '@/lib/client/queries/settings'
+import { cn } from '@/lib/shared/utils/cn'
 import type { BoardId } from '@quackback/ids'
 import {
   ACCESS_TIER_RANK,
@@ -33,31 +39,122 @@ import {
   type BoardAccess,
   DEFAULT_BOARD_ACCESS,
 } from '@/lib/shared/db-types'
-import { TierSelect } from './tier-select'
 
 /**
- * Per-board access matrix form. Backed by the BoardAccess shape
- * (view / comment / submit tiers + per-action segment lists + approval).
+ * Per-board access matrix. Replaces the stacked-tier form with a compact
+ * 3 × 4 grid (action × tier) plus inline per-action segment pickers.
  *
- * D1 → D2 transition note: the data model now stores a per-action
- * `segments: { view, comment, submit }` matrix, but this form still
- * shows a single shared segment picker (legacy UX). On read we use the
- * union of the three per-action lists; on write we mirror the picker
- * selection back to every action whose tier is 'segments'. D2 will
- * rewrite this form into the per-action matrix UI.
+ * The persisted shape is `BoardAccess` (see @/lib/shared/db-types). Approval
+ * flags are intentionally NOT exposed in this UI — moderation is governed
+ * at the workspace level. The form preserves the existing approval values
+ * on save so prior data is never zeroed out.
  *
- * Layout (top to bottom):
- *  1. Quick presets card grid — Public / Auth-only / Team / Custom.
- *  2. View tier picker.
- *  3. Comment tier picker — minTier = view so it can't be more permissive.
- *  4. Submit tier picker — same rank invariant.
- *  5. Single shared segments multi-select — only rendered when any tier is 'segments'.
- *  6. Approval card — two checkboxes (hold posts / hold comments).
- *  7. Save button — disabled while segments are required but unselected.
- *
- * Submit calls `updateBoardAccessFn` (admin-only, audited) — distinct from
- * the general board update path so members can't change board visibility.
+ * Behaviours mirrored from the design (matrix-final.jsx):
+ *   - 4 preset cards (Public / Auth only / Team only / Custom).
+ *   - Matrix hides when a non-custom preset is active; clicking Custom
+ *     restores the last custom grid via a ref.
+ *   - userPreset is sticky — editing a cell sets it to 'custom'; the
+ *     auto-cascade does NOT flip the preset back to a matching preset.
+ *   - Tier hierarchy enforced visually: Comment/Submit cells with rank
+ *     below View's rank are disabled (striped, lock icon, cursor not-allowed).
+ *   - Selecting a stricter View tier auto-bumps Comment/Submit if they
+ *     would otherwise violate the invariant.
+ *   - Segments tier opens an inline popover anchored to the clicked cell;
+ *     each action has its own segment list (per the D1 data model).
+ *   - Save disabled when any action is on the 'segments' tier but its
+ *     list is empty; sticky save dock surfaces the error inline.
  */
+
+// ─── Static config ────────────────────────────────────────────────────
+
+interface TierMeta {
+  id: AccessTier
+  label: string
+  blurb: string
+  icon: React.ComponentType<{ className?: string }>
+  hueClass: string // text color class for the column-header icon (gradient cue)
+}
+
+const TIERS: readonly TierMeta[] = [
+  {
+    id: 'anonymous',
+    label: 'Anyone',
+    blurb: 'Public · no sign-in',
+    icon: GlobeAltIcon,
+    hueClass: 'text-emerald-400',
+  },
+  {
+    id: 'authenticated',
+    label: 'Signed-in',
+    blurb: 'Any logged-in user',
+    icon: UsersIcon,
+    hueClass: 'text-yellow-300',
+  },
+  {
+    id: 'segments',
+    label: 'Segments',
+    blurb: 'Specific audiences',
+    icon: TagIcon,
+    hueClass: 'text-orange-400',
+  },
+  {
+    id: 'team',
+    label: 'Team only',
+    blurb: 'Workspace members',
+    icon: LockClosedIcon,
+    hueClass: 'text-rose-400',
+  },
+] as const
+
+interface ActionMeta {
+  id: 'view' | 'comment' | 'submit'
+  label: string
+  sub: string
+  icon: React.ComponentType<{ className?: string }>
+}
+
+const ACTIONS: readonly ActionMeta[] = [
+  { id: 'view', label: 'View & vote', sub: 'See the board and cast votes', icon: EyeIcon },
+  { id: 'comment', label: 'Comment', sub: 'Reply on existing posts', icon: ChatBubbleLeftIcon },
+  { id: 'submit', label: 'Submit posts', sub: 'Create new feedback', icon: PaperAirplaneIcon },
+] as const
+
+type ActionId = (typeof ACTIONS)[number]['id']
+type PresetName = 'public' | 'authenticated' | 'team' | 'custom'
+
+interface PresetMeta {
+  id: Exclude<PresetName, 'custom'>
+  label: string
+  description: string
+  icon: React.ComponentType<{ className?: string }>
+  tiers: Record<ActionId, AccessTier>
+}
+
+const PRESET_META: readonly PresetMeta[] = [
+  {
+    id: 'public',
+    label: 'Public',
+    description: 'Anyone can view, vote, comment, and submit.',
+    icon: GlobeAltIcon,
+    tiers: { view: 'anonymous', comment: 'anonymous', submit: 'anonymous' },
+  },
+  {
+    id: 'authenticated',
+    label: 'Auth only',
+    description: 'Signed-in users can view, vote, comment, and submit.',
+    icon: UsersIcon,
+    tiers: { view: 'authenticated', comment: 'authenticated', submit: 'authenticated' },
+  },
+  {
+    id: 'team',
+    label: 'Team only',
+    description: 'Only workspace members can view, vote, comment, and submit.',
+    icon: LockClosedIcon,
+    tiers: { view: 'team', comment: 'team', submit: 'team' },
+  },
+] as const
+
+// ─── Form shape ───────────────────────────────────────────────────────
 
 interface Board {
   id: BoardId
@@ -68,462 +165,761 @@ interface BoardAccessFormProps {
   board: Board
 }
 
-type PresetName = 'public' | 'authenticated' | 'team' | 'custom'
+type FormShape = BoardAccess
 
-const PRESET_META: Record<
-  Exclude<PresetName, 'custom'>,
-  {
-    label: string
-    description: string
-    icon: React.ComponentType<{ className?: string }>
-    tiers: Pick<BoardAccess, 'view' | 'comment' | 'submit'>
-  }
-> = {
-  public: {
-    label: 'Public',
-    description: 'Anyone can view, vote, comment, and submit feedback.',
-    icon: GlobeAltIcon,
-    tiers: { view: 'anonymous', comment: 'anonymous', submit: 'anonymous' },
-  },
-  authenticated: {
-    label: 'Auth-only',
-    description: 'Sign in to see anything.',
-    icon: UsersIcon,
-    tiers: {
-      view: 'authenticated',
-      comment: 'authenticated',
-      submit: 'authenticated',
-    },
-  },
-  team: {
-    label: 'Team only',
-    description: 'Hidden from the portal.',
-    icon: LockClosedIcon,
-    tiers: { view: 'team', comment: 'team', submit: 'team' },
-  },
-}
-
-/**
- * Form-local shape. The persisted BoardAccess stores per-action segment
- * lists; while the form still has a single shared picker (legacy UX,
- * to be replaced in D2) we keep a single `segmentIds: string[]` field on
- * the form and translate on submit. We also derive it on read from the
- * union of the three persisted lists so existing rows show every picked
- * segment when the form opens.
- */
-type FormAccess = Omit<BoardAccess, 'segments'> & { segmentIds: string[] }
-
-function unionSegments(access: BoardAccess): string[] {
-  const seen = new Set<string>()
-  for (const list of [access.segments.view, access.segments.comment, access.segments.submit]) {
-    for (const id of list) seen.add(id)
-  }
-  return Array.from(seen)
-}
-
-function toFormAccess(access: BoardAccess): FormAccess {
-  return {
-    view: access.view,
-    comment: access.comment,
-    submit: access.submit,
-    segmentIds: unionSegments(access),
-    approval: { ...access.approval },
-  }
-}
-
-function fromFormAccess(form: FormAccess): BoardAccess {
-  // Mirror the shared picker selection to every action whose tier requires
-  // segments. Other actions get an empty list — the server enforces the
-  // per-action non-empty invariant only for the 'segments' tier.
-  return {
-    view: form.view,
-    comment: form.comment,
-    submit: form.submit,
-    segments: {
-      view: form.view === 'segments' ? form.segmentIds : [],
-      comment: form.comment === 'segments' ? form.segmentIds : [],
-      submit: form.submit === 'segments' ? form.segmentIds : [],
-    },
-    approval: { ...form.approval },
-  }
-}
-
-/** Find the preset the current form values correspond to, if any.
- *  We require tier match + approval flags both off; for the segments-bearing
- *  case (which today no preset uses) we also require segmentIds to be empty
- *  so picked segments don't silently survive a preset switch. */
-function detectPreset(access: FormAccess): PresetName {
-  for (const [name, meta] of Object.entries(PRESET_META) as [
-    Exclude<PresetName, 'custom'>,
-    (typeof PRESET_META)[Exclude<PresetName, 'custom'>],
-  ][]) {
+function deriveInitialPreset(access: BoardAccess): PresetName {
+  for (const meta of PRESET_META) {
     const tiersMatch =
       access.view === meta.tiers.view &&
       access.comment === meta.tiers.comment &&
       access.submit === meta.tiers.submit
     const approvalOff = !access.approval.posts && !access.approval.comments
-    // For a non-segments preset, segmentIds must be empty (preset-clean state).
-    // For the segments preset there is no preset card right now (only Public/Auth/Team
-    // have entries in PRESET_META), so this branch is the only one we exercise.
-    const segmentsAlignWithTier =
-      meta.tiers.view === 'segments' ? true : access.segmentIds.length === 0
-    if (tiersMatch && approvalOff && segmentsAlignWithTier) {
-      return name
-    }
+    const segmentsClean =
+      access.segments.view.length === 0 &&
+      access.segments.comment.length === 0 &&
+      access.segments.submit.length === 0
+    if (tiersMatch && approvalOff && segmentsClean) return meta.id
   }
   return 'custom'
 }
 
-function applyPreset(name: Exclude<PresetName, 'custom'>, current: FormAccess): FormAccess {
-  const tiers = PRESET_META[name].tiers
-  // If the target preset doesn't use the 'segments' tier anywhere, drop any
-  // stale segmentIds so a preset switch fully resets the selection state.
-  const anyTargetSegments =
-    tiers.view === 'segments' || tiers.comment === 'segments' || tiers.submit === 'segments'
+function applyPreset(meta: PresetMeta, current: FormShape): FormShape {
   return {
     ...current,
-    view: tiers.view,
-    comment: tiers.comment,
-    submit: tiers.submit,
-    segmentIds: anyTargetSegments ? current.segmentIds : [],
-    approval: { posts: false, comments: false },
+    view: meta.tiers.view,
+    comment: meta.tiers.comment,
+    submit: meta.tiers.submit,
+    // Presets always clear segment lists — they target non-segments tiers.
+    segments: { view: [], comment: [], submit: [] },
+    // Approval is preserved (UI doesn't expose it).
   }
 }
 
-/** Inline warning rendered under a tier section when the chosen tier is
- *  'anonymous' but the matching workspace-wide kill switch is off. Surfaces
- *  the silent-conflict at config time so admins don't ship a board that
- *  invites anonymous traffic the workspace will then block. */
-function KillSwitchWarning({ feature }: { feature: 'voting' | 'commenting' | 'posting' }) {
-  const verb =
-    feature === 'voting'
-      ? 'view but not vote'
-      : feature === 'commenting'
-        ? 'view but not comment'
-        : 'view but not submit'
-  return (
-    <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
-      <ExclamationTriangleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span>
-        Anonymous {feature} is off workspace-wide.{' '}
-        <Link to="/admin/settings/moderation" className="underline">
-          Enable in Moderation
-        </Link>{' '}
-        or anonymous users will {verb}.
-      </span>
-    </p>
-  )
+// ─── Main form ────────────────────────────────────────────────────────
+
+interface SegmentItem {
+  id: string
+  name: string
+  count: number
+  description?: string | null
 }
 
 export function BoardAccessForm({ board }: BoardAccessFormProps) {
   const mutation = useUpdateBoardAccess()
   const segmentsQuery = useSegments()
-  // Non-suspense — the warnings degrade gracefully if portalConfig hasn't
-  // landed yet (the form stays usable; the conflict surface just appears
-  // once data is in cache).
-  const portalConfigQuery = useQuery(settingsQueries.portalConfig())
-  const features = portalConfigQuery.data?.features
+  const segments: SegmentItem[] = useMemo(
+    () =>
+      (segmentsQuery.data ?? []).map((s) => ({
+        id: s.id as string,
+        name: s.name,
+        count: s.memberCount,
+        description: s.description,
+      })),
+    [segmentsQuery.data]
+  )
 
-  const form = useForm<FormAccess>({
-    defaultValues: toFormAccess(board.access ?? DEFAULT_BOARD_ACCESS),
+  const form = useForm<FormShape>({
+    defaultValues: board.access ?? DEFAULT_BOARD_ACCESS,
   })
 
-  // Sync form state when the server-side board.access changes (e.g. successful
-  // save + cache update, or rollback on error). Serialized access powers the
-  // dep check because deep-eq on the nested object is the source of truth.
+  // Sticky preset selection — the grid may coincidentally match a preset
+  // after editing or cascading, but we never auto-flip the user out of
+  // Custom. Only explicit preset card clicks set this.
+  const [userPreset, setUserPreset] = useState<PresetName>(() =>
+    deriveInitialPreset(board.access ?? DEFAULT_BOARD_ACCESS)
+  )
+  const lastCustomGrid = useRef<FormShape>(board.access ?? DEFAULT_BOARD_ACCESS)
+  const [openPicker, setOpenPicker] = useState<ActionId | null>(null)
+
+  // Sync form + preset state when the server-side board.access changes.
   const accessKey = JSON.stringify(board.access)
   useEffect(() => {
-    form.reset(toFormAccess(board.access ?? DEFAULT_BOARD_ACCESS))
+    const next = board.access ?? DEFAULT_BOARD_ACCESS
+    form.reset(next)
+    setUserPreset(deriveInitialPreset(next))
+    lastCustomGrid.current = next
+    setOpenPicker(null)
   }, [accessKey, board.access, form])
 
   const values = form.watch()
-  const anySegments = useMemo(
-    () =>
-      values.view === 'segments' || values.comment === 'segments' || values.submit === 'segments',
-    [values.view, values.comment, values.submit]
-  )
-  const needsSegments = anySegments && values.segmentIds.length === 0
-  const preset = detectPreset(values)
 
-  async function onSubmit(next: FormAccess) {
-    // Defense-in-depth: the button is disabled when segments are required
-    // but empty; this re-check covers Enter-key submit from a focused input.
-    if (
-      (next.view === 'segments' || next.comment === 'segments' || next.submit === 'segments') &&
-      next.segmentIds.length === 0
-    ) {
-      return
-    }
-    mutation.mutate({ boardId: board.id, access: fromFormAccess(next) })
-  }
+  // Validate: any action on the 'segments' tier needs ≥1 segment selected.
+  const segsError = useMemo(
+    () =>
+      ACTIONS.some(
+        (a) => values[a.id] === 'segments' && (values.segments[a.id] ?? []).length === 0
+      ),
+    [values]
+  )
+
+  const dirty = form.formState.isDirty
+
+  const handlePresetClick = useCallback(
+    (id: PresetName) => {
+      if (id === 'custom') {
+        setUserPreset('custom')
+        form.reset(lastCustomGrid.current)
+        setOpenPicker(null)
+        return
+      }
+      const meta = PRESET_META.find((p) => p.id === id)
+      if (!meta) return
+      if (userPreset === 'custom') {
+        // Snapshot the current custom state so users can return to it.
+        lastCustomGrid.current = { ...values }
+      }
+      setUserPreset(id)
+      form.reset(applyPreset(meta, values))
+      setOpenPicker(null)
+    },
+    [form, userPreset, values]
+  )
+
+  const handleTierClick = useCallback(
+    (actionId: ActionId, tierId: AccessTier) => {
+      // Tier hierarchy: comment/submit can't be more open than view.
+      if (actionId !== 'view' && ACCESS_TIER_RANK[tierId] < ACCESS_TIER_RANK[values.view]) {
+        return
+      }
+
+      // Editing any cell pins the form to Custom mode (sticky).
+      setUserPreset('custom')
+
+      form.setValue(actionId, tierId, { shouldDirty: true })
+
+      // Cascade: raising view tier may force comment/submit up to keep
+      // the invariant comment.rank >= view.rank && submit.rank >= view.rank.
+      if (actionId === 'view') {
+        const vRank = ACCESS_TIER_RANK[tierId]
+        if (ACCESS_TIER_RANK[values.comment] < vRank) {
+          form.setValue('comment', tierId, { shouldDirty: true })
+        }
+        if (ACCESS_TIER_RANK[values.submit] < vRank) {
+          form.setValue('submit', tierId, { shouldDirty: true })
+        }
+      }
+
+      // Picker hint: auto-open the segments popover for the action when
+      // it first lands on the segments tier with an empty list.
+      if (tierId === 'segments') {
+        if ((values.segments[actionId] ?? []).length === 0) {
+          setOpenPicker(actionId)
+        }
+      } else if (openPicker === actionId) {
+        setOpenPicker(null)
+      }
+    },
+    [form, openPicker, values]
+  )
+
+  const handleSegsChange = useCallback(
+    (actionId: ActionId, ids: string[]) => {
+      form.setValue(`segments.${actionId}`, ids, { shouldDirty: true })
+    },
+    [form]
+  )
+
+  const onSubmit = useCallback(
+    (next: FormShape) => {
+      if (segsError) return
+      mutation.mutate({ boardId: board.id, access: next })
+    },
+    [board.id, mutation, segsError]
+  )
+
+  const handleDiscard = useCallback(() => {
+    const original = board.access ?? DEFAULT_BOARD_ACCESS
+    form.reset(original)
+    setUserPreset(deriveInitialPreset(original))
+    setOpenPicker(null)
+  }, [board.access, form])
+
+  const matrixVisible = userPreset === 'custom'
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-        {mutation.isError && <FormError message={mutation.error?.message ?? 'An error occurred'} />}
+    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pb-24">
+      {mutation.isError && <FormError message={mutation.error?.message ?? 'An error occurred'} />}
 
-        {/* ────────── Quick presets ────────── */}
-        <div className="space-y-3">
+      {/* ────────── Access Control card ────────── */}
+      <div className="rounded-xl border bg-card">
+        <div className="p-5 space-y-4">
           <div>
-            <FormLabel className="text-base">Quick presets</FormLabel>
-            <FormDescription>
-              Start from a common configuration. Custom is selected automatically when you tweak
-              anything below.
-            </FormDescription>
+            <h2 className="text-base font-semibold">Access Control</h2>
+            <p className="mt-1 text-xs text-muted-foreground max-w-xl">
+              Apply a preset for a quick start, or pick Custom to fine-tune each action.
+            </p>
           </div>
-          <RadioGroup
-            value={preset}
-            onValueChange={(p) => {
-              if (p !== 'custom') {
-                const next = applyPreset(p as Exclude<PresetName, 'custom'>, values)
-                form.reset(next)
+
+          <PresetGrid active={userPreset} onSelect={handlePresetClick} />
+        </div>
+
+        {matrixVisible && (
+          <>
+            <div className="h-px bg-border" />
+            <div className="p-5 space-y-3">
+              <div className="flex items-baseline justify-between">
+                <span className="text-sm font-semibold">Per-action permissions</span>
+                <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1.5">
+                  <span
+                    className="inline-block h-1 w-5 rounded-sm"
+                    style={{
+                      background:
+                        'linear-gradient(to right, rgb(74 222 128), rgb(250 204 21), rgb(248 113 113))',
+                    }}
+                  />
+                  More open <span className="opacity-60">→</span> More restrictive
+                </span>
+              </div>
+
+              <Matrix
+                values={values}
+                segments={segments}
+                segmentsLoading={segmentsQuery.isLoading}
+                openPicker={openPicker}
+                onCellClick={handleTierClick}
+                onOpenPicker={(id) => setOpenPicker((p) => (p === id ? null : id))}
+                onClosePicker={() => setOpenPicker(null)}
+                onSegsChange={handleSegsChange}
+              />
+            </div>
+          </>
+        )}
+      </div>
+
+      <p className="flex items-center gap-2 text-[11px] text-muted-foreground">
+        <ShieldCheckIcon className="h-3 w-3" />
+        Team members and admins always have full access — they bypass these rules.
+      </p>
+
+      <SaveDock
+        dirty={dirty}
+        error={segsError}
+        saving={mutation.isPending}
+        onDiscard={handleDiscard}
+      />
+    </form>
+  )
+}
+
+// ─── Preset cards row ────────────────────────────────────────────────
+
+interface PresetGridProps {
+  active: PresetName
+  onSelect: (id: PresetName) => void
+}
+
+function PresetGrid({ active, onSelect }: PresetGridProps) {
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {PRESET_META.map((p) => (
+        <PresetCard
+          key={p.id}
+          active={active === p.id}
+          label={p.label}
+          description={p.description}
+          icon={<p.icon className="h-3 w-3" />}
+          onClick={() => onSelect(p.id)}
+        />
+      ))}
+      <PresetCard
+        active={active === 'custom'}
+        label="Custom"
+        description="Fine-tune each action below."
+        icon={<PencilSquareIcon className="h-3 w-3" />}
+        dashed
+        onClick={() => onSelect('custom')}
+      />
+    </div>
+  )
+}
+
+interface PresetCardProps {
+  active: boolean
+  label: string
+  description: string
+  icon: React.ReactNode
+  dashed?: boolean
+  onClick: () => void
+}
+
+function PresetCard({ active, label, description, icon, dashed, onClick }: PresetCardProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-pressed={active}
+      className={cn(
+        'flex flex-col items-stretch gap-1 rounded-lg border px-3 py-2.5 text-left transition-colors',
+        dashed ? 'border-dashed' : '',
+        active
+          ? 'border-primary bg-primary/10'
+          : 'border-border bg-muted/30 hover:bg-muted/60 cursor-pointer'
+      )}
+    >
+      <div className="flex items-center gap-1.5">
+        <span className={active ? 'text-primary' : 'text-muted-foreground'}>{icon}</span>
+        <span className={cn('text-xs font-semibold', active && 'text-primary')}>{label}</span>
+        {active && <CheckIcon className="ml-auto h-3 w-3 text-primary" />}
+      </div>
+      <span className="text-[11px] leading-snug text-muted-foreground">{description}</span>
+    </button>
+  )
+}
+
+// ─── Matrix ──────────────────────────────────────────────────────────
+
+interface MatrixProps {
+  values: FormShape
+  segments: ReadonlyArray<SegmentItem>
+  segmentsLoading: boolean
+  openPicker: ActionId | null
+  onCellClick: (actionId: ActionId, tierId: AccessTier) => void
+  onOpenPicker: (id: ActionId) => void
+  onClosePicker: () => void
+  onSegsChange: (actionId: ActionId, ids: string[]) => void
+}
+
+function Matrix({
+  values,
+  segments,
+  segmentsLoading,
+  openPicker,
+  onCellClick,
+  onOpenPicker,
+  onClosePicker,
+  onSegsChange,
+}: MatrixProps) {
+  return (
+    <div
+      className="overflow-hidden rounded-lg border bg-muted/20"
+      role="grid"
+      aria-label="Permissions matrix"
+    >
+      <div
+        className="grid bg-muted/40 border-b text-[11px] uppercase tracking-wider text-muted-foreground"
+        style={{ gridTemplateColumns: '1.5fr repeat(4, 1fr)' }}
+      >
+        <div className="px-4 py-2.5 font-medium">Action</div>
+        {TIERS.map((t) => (
+          <div
+            key={t.id}
+            className="flex flex-col items-center justify-center gap-0.5 border-l py-2 text-center normal-case"
+          >
+            <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-foreground">
+              <span className={t.hueClass}>
+                <t.icon className="h-3 w-3" />
+              </span>
+              {t.label}
+            </div>
+            <div className="text-[10px] text-muted-foreground tracking-normal">{t.blurb}</div>
+          </div>
+        ))}
+      </div>
+
+      {ACTIONS.map((action, idx) => (
+        <MatrixRow
+          key={action.id}
+          action={action}
+          values={values}
+          isLast={idx === ACTIONS.length - 1}
+          segments={segments}
+          segmentsLoading={segmentsLoading}
+          pickerOpen={openPicker === action.id}
+          onCellClick={(tier) => onCellClick(action.id, tier)}
+          onOpenPicker={() => onOpenPicker(action.id)}
+          onClosePicker={onClosePicker}
+          onSegsChange={(ids) => onSegsChange(action.id, ids)}
+        />
+      ))}
+    </div>
+  )
+}
+
+interface MatrixRowProps {
+  action: ActionMeta
+  values: FormShape
+  isLast: boolean
+  segments: MatrixProps['segments']
+  segmentsLoading: boolean
+  pickerOpen: boolean
+  onCellClick: (tier: AccessTier) => void
+  onOpenPicker: () => void
+  onClosePicker: () => void
+  onSegsChange: (ids: string[]) => void
+}
+
+function MatrixRow({
+  action,
+  values,
+  isLast,
+  segments,
+  segmentsLoading,
+  pickerOpen,
+  onCellClick,
+  onOpenPicker,
+  onClosePicker,
+  onSegsChange,
+}: MatrixRowProps) {
+  const segCellRef = useRef<HTMLButtonElement | null>(null)
+  const selectedTier = values[action.id]
+  const segIds = values.segments[action.id]
+  const reach = useMemo(
+    () => segments.filter((s) => segIds.includes(s.id)).reduce((a, s) => a + s.count, 0),
+    [segments, segIds]
+  )
+  const isEmptySegments = selectedTier === 'segments' && segIds.length === 0
+  const minRank = action.id === 'view' ? 0 : ACCESS_TIER_RANK[values.view]
+
+  return (
+    <div
+      className={cn('relative grid border-b', isLast && 'border-b-0')}
+      style={{ gridTemplateColumns: '1.5fr repeat(4, 1fr)' }}
+      role="row"
+    >
+      <div className="flex items-center gap-3 px-4 py-3">
+        <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
+          <action.icon className="h-3.5 w-3.5" />
+        </span>
+        <div>
+          <div className="text-sm font-medium">{action.label}</div>
+          <div className="text-[11px] text-muted-foreground">{action.sub}</div>
+        </div>
+      </div>
+
+      {TIERS.map((tier) => {
+        const isSelected = selectedTier === tier.id
+        const disabled = ACCESS_TIER_RANK[tier.id] < minRank
+        const isSegmentsCell = tier.id === 'segments'
+
+        const tooltip = disabled
+          ? `Can't be more open than View & vote (${TIERS.find((x) => ACCESS_TIER_RANK[x.id] === minRank)?.label}).`
+          : undefined
+
+        const disabledStyle: CSSProperties = disabled
+          ? {
+              background:
+                'repeating-linear-gradient(135deg, transparent 0 6px, rgba(255,255,255,0.02) 6px 7px)',
+            }
+          : {}
+
+        return (
+          <button
+            key={tier.id}
+            type="button"
+            ref={isSegmentsCell ? segCellRef : null}
+            title={tooltip}
+            onClick={() => {
+              if (disabled) return
+              if (isSegmentsCell && isSelected) {
+                onOpenPicker()
+              } else {
+                onCellClick(tier.id)
               }
             }}
-            className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+            disabled={disabled}
+            aria-label={`${action.label}: ${tier.label}`}
+            aria-pressed={isSelected}
+            className={cn(
+              'flex min-h-[58px] items-center justify-center border-l px-2 py-3 transition-colors',
+              !disabled && 'cursor-pointer',
+              disabled && 'cursor-not-allowed opacity-40',
+              !disabled && isSelected && !isEmptySegments && 'bg-primary/10',
+              !disabled && isSelected && isEmptySegments && 'bg-destructive/10',
+              !disabled && !isSelected && 'hover:bg-muted/40'
+            )}
+            style={disabledStyle}
           >
-            {(['public', 'authenticated', 'team'] as const).map((name) => {
-              const meta = PRESET_META[name]
-              const id = `preset-${name}`
-              const Icon = meta.icon
-              return (
-                <Label
-                  key={name}
-                  htmlFor={id}
-                  className="flex items-start gap-2 rounded-lg border p-3 cursor-pointer hover:bg-muted/50 [&:has([data-state=checked])]:border-primary [&:has([data-state=checked])]:bg-primary/5"
-                >
-                  <RadioGroupItem value={name} id={id} className="mt-0.5" />
-                  <div className="flex-1 space-y-0.5">
-                    <div className="flex items-center gap-1.5">
-                      <Icon className="h-3.5 w-3.5" />
-                      <span className="text-sm font-medium">{meta.label}</span>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground leading-tight">
-                      {meta.description}
-                    </p>
-                  </div>
-                </Label>
-              )
-            })}
-            <Label
-              htmlFor="preset-custom"
-              className="flex items-start gap-2 rounded-lg border p-3 cursor-pointer hover:bg-muted/50 [&:has([data-state=checked])]:border-primary [&:has([data-state=checked])]:bg-primary/5"
-            >
-              <RadioGroupItem value="custom" id="preset-custom" className="mt-0.5" />
-              <div className="flex-1 space-y-0.5">
-                <span className="text-sm font-medium">Custom</span>
-                <p className="text-[11px] text-muted-foreground leading-tight">Per-action tiers.</p>
-              </div>
-            </Label>
-          </RadioGroup>
-        </div>
-
-        {/* ────────── View ────────── */}
-        <FormField
-          control={form.control}
-          name="view"
-          render={({ field }) => (
-            <FormItem className="space-y-3">
-              <div>
-                <FormLabel className="text-base">Who can view the board and vote?</FormLabel>
-                <FormDescription>
-                  Voting follows the same rule as viewing. To gate voting separately, use the
-                  workspace anonymous-voting toggle in Moderation.
-                </FormDescription>
-              </div>
-              <FormControl>
-                <TierSelect
-                  value={field.value as AccessTier}
-                  onChange={(v) => {
-                    field.onChange(v)
-                    // Rank invariant: if comment/submit are now more permissive
-                    // than the new view tier, clamp them up so Save doesn't
-                    // produce an invariant violation the server would reject.
-                    const newRank = ACCESS_TIER_RANK[v]
-                    if (ACCESS_TIER_RANK[values.comment] < newRank) {
-                      form.setValue('comment', v, { shouldDirty: true })
-                    }
-                    if (ACCESS_TIER_RANK[values.submit] < newRank) {
-                      form.setValue('submit', v, { shouldDirty: true })
-                    }
-                  }}
-                  ariaLabel="View tier"
-                />
-              </FormControl>
-              {values.view === 'anonymous' && features?.anonymousVoting === false && (
-                <KillSwitchWarning feature="voting" />
-              )}
-            </FormItem>
-          )}
-        />
-
-        {/* ────────── Comment ────────── */}
-        <FormField
-          control={form.control}
-          name="comment"
-          render={({ field }) => (
-            <FormItem className="space-y-3">
-              <div>
-                <FormLabel className="text-base">Who can comment?</FormLabel>
-              </div>
-              <FormControl>
-                <TierSelect
-                  value={field.value as AccessTier}
-                  onChange={(v) => {
-                    // Rank invariant: comment can't be more permissive than view.
-                    if (ACCESS_TIER_RANK[v] >= ACCESS_TIER_RANK[values.view]) {
-                      field.onChange(v)
-                    }
-                  }}
-                  minTier={values.view}
-                  ariaLabel="Comment tier"
-                />
-              </FormControl>
-              {values.comment === 'anonymous' && features?.anonymousCommenting === false && (
-                <KillSwitchWarning feature="commenting" />
-              )}
-            </FormItem>
-          )}
-        />
-
-        {/* ────────── Submit ────────── */}
-        <FormField
-          control={form.control}
-          name="submit"
-          render={({ field }) => (
-            <FormItem className="space-y-3">
-              <div>
-                <FormLabel className="text-base">Who can submit new posts?</FormLabel>
-              </div>
-              <FormControl>
-                <TierSelect
-                  value={field.value as AccessTier}
-                  onChange={(v) => {
-                    if (ACCESS_TIER_RANK[v] >= ACCESS_TIER_RANK[values.view]) {
-                      field.onChange(v)
-                    }
-                  }}
-                  minTier={values.view}
-                  ariaLabel="Submit tier"
-                />
-              </FormControl>
-              {values.submit === 'anonymous' && features?.anonymousPosting === false && (
-                <KillSwitchWarning feature="posting" />
-              )}
-            </FormItem>
-          )}
-        />
-
-        {/* ────────── Segments (conditional) ────────── */}
-        {anySegments && (
-          <FormField
-            control={form.control}
-            name="segmentIds"
-            render={({ field }) => (
-              <FormItem className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <FormLabel className="text-base">Segments</FormLabel>
-                  <Link
-                    to="/admin/settings/people"
-                    className="text-xs font-medium text-primary hover:underline"
-                  >
-                    Manage segments →
-                  </Link>
-                </div>
-                <FormDescription>
-                  Used wherever &quot;Segments&quot; is selected above.
-                </FormDescription>
-                {segmentsQuery.isLoading ? (
-                  <p className="text-xs text-muted-foreground">Loading segments…</p>
-                ) : segmentsQuery.isError ? (
-                  <p className="text-xs text-destructive">
-                    Could not load segments. Reload the page to try again.
-                  </p>
-                ) : (segmentsQuery.data ?? []).length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    No segments defined yet — create one on the{' '}
-                    <Link to="/admin/settings/people" className="text-primary hover:underline">
-                      People page
-                    </Link>
-                    , then come back to pick it.
-                  </p>
-                ) : (
-                  <SegmentMultiSelect
-                    segments={segmentsQuery.data ?? []}
-                    value={field.value}
-                    onChange={(next) => field.onChange(next)}
-                    disabled={mutation.isPending}
-                  />
+            {isSegmentsCell && isSelected && !disabled ? (
+              <SegmentCellPreview
+                empty={isEmptySegments}
+                selected={segments.filter((s) => segIds.includes(s.id))}
+                reach={reach}
+              />
+            ) : (
+              <span
+                className={cn(
+                  'inline-flex h-4 w-4 items-center justify-center rounded-full border-2',
+                  isSelected && !disabled
+                    ? 'border-primary bg-transparent'
+                    : 'border-border bg-background'
                 )}
-                {needsSegments && (segmentsQuery.data ?? []).length > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    Pick at least one segment to save.
-                  </p>
+              >
+                {isSelected && !disabled && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
                 )}
-              </FormItem>
+                {disabled && <LockClosedIcon className="h-2.5 w-2.5 text-muted-foreground" />}
+              </span>
             )}
-          />
+          </button>
+        )
+      })}
+
+      {pickerOpen && (
+        <SegmentPicker
+          anchorRef={segCellRef}
+          allSegments={segments}
+          loading={segmentsLoading}
+          selected={segIds}
+          onChange={onSegsChange}
+          onClose={onClosePicker}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── In-cell preview when a row picks 'segments' ─────────────────────
+
+interface SegmentCellPreviewProps {
+  empty: boolean
+  selected: ReadonlyArray<{ id: string; name: string }>
+  reach: number
+}
+
+function SegmentCellPreview({ empty, selected, reach }: SegmentCellPreviewProps) {
+  if (empty) {
+    return (
+      <span className="flex flex-col items-center gap-0.5 text-[11px] font-medium text-destructive">
+        <InformationCircleIcon className="h-3 w-3" />
+        Pick segments
+      </span>
+    )
+  }
+  const first = selected[0]
+  const extra = selected.length - 1
+  return (
+    <span className="flex w-full flex-col items-center gap-0.5 px-1 text-center">
+      <span className="flex max-w-full items-center gap-1">
+        <span className="max-w-[110px] truncate text-[11.5px] font-medium text-primary">
+          {first?.name}
+        </span>
+        {extra > 0 && (
+          <span className="rounded border border-primary/30 bg-primary/10 px-1 text-[10px] font-semibold leading-4 text-primary">
+            +{extra}
+          </span>
         )}
+        <ChevronDownIcon className="h-2.5 w-2.5 text-primary/70" />
+      </span>
+      <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+        <UsersIcon className="h-2.5 w-2.5" />
+        <span className="font-mono tabular-nums">≈ {reach}</span>
+      </span>
+    </span>
+  )
+}
 
-        {/* ────────── Approval ────────── */}
-        <div className="space-y-3 rounded-lg border bg-card p-4">
-          <div className="flex items-center gap-2">
-            <ShieldCheckIcon className="h-4 w-4 text-muted-foreground" />
-            <FormLabel className="text-base">Approval</FormLabel>
-          </div>
-          <FormDescription>
-            Hold new submissions for review before they go live. For finer rules (e.g. only
-            anonymous), use the workspace default in{' '}
-            <Link to="/admin/settings/moderation" className="text-primary hover:underline">
-              Moderation
-            </Link>
-            .
-          </FormDescription>
-          <FormField
-            control={form.control}
-            name="approval.posts"
-            render={({ field }) => (
-              <FormItem className="flex items-center gap-2 space-y-0">
-                <FormControl>
-                  <Checkbox
-                    checked={field.value}
-                    onCheckedChange={(v) => field.onChange(v === true)}
-                  />
-                </FormControl>
-                <FormLabel className="text-sm font-normal cursor-pointer">
-                  Hold new posts for review
-                </FormLabel>
-              </FormItem>
+// ─── Inline popover combobox ─────────────────────────────────────────
+
+interface SegmentPickerProps {
+  anchorRef: React.RefObject<HTMLElement | null>
+  allSegments: MatrixProps['segments']
+  loading: boolean
+  selected: readonly string[]
+  onChange: (ids: string[]) => void
+  onClose: () => void
+}
+
+function SegmentPicker({
+  anchorRef,
+  allSegments,
+  loading,
+  selected,
+  onChange,
+  onClose,
+}: SegmentPickerProps) {
+  const [search, setSearch] = useState('')
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const popRef = useRef<HTMLDivElement | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  useLayoutEffect(() => {
+    if (!anchorRef.current) return
+    const r = anchorRef.current.getBoundingClientRect()
+    setPos({ top: r.bottom + 4, left: Math.max(8, r.right - 320), width: 320 })
+  }, [anchorRef])
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (popRef.current?.contains(target)) return
+      if (anchorRef.current?.contains(target)) return
+      onClose()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [anchorRef, onClose])
+
+  if (!pos) return null
+
+  const q = search.trim().toLowerCase()
+  const filtered = q ? allSegments.filter((s) => s.name.toLowerCase().includes(q)) : allSegments
+  const totalReach = allSegments
+    .filter((s) => selected.includes(s.id))
+    .reduce((a, s) => a + s.count, 0)
+
+  const toggle = (id: string) => {
+    if (selected.includes(id)) onChange(selected.filter((x) => x !== id))
+    else onChange([...selected, id])
+  }
+
+  return createPortal(
+    <div
+      ref={popRef}
+      role="dialog"
+      aria-label="Pick segments"
+      style={{
+        position: 'fixed',
+        top: pos.top,
+        left: pos.left,
+        width: pos.width,
+        zIndex: 200,
+      }}
+      className="overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-xl"
+    >
+      <div className="flex items-center gap-2 border-b px-3 py-2">
+        <MagnifyingGlassIcon className="h-3 w-3 text-muted-foreground" />
+        <input
+          ref={inputRef}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search or create…"
+          className="flex-1 bg-transparent text-[12.5px] outline-none placeholder:text-muted-foreground"
+        />
+        {selected.length > 0 && (
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="text-[11px] text-muted-foreground hover:text-foreground"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
+      <div className="max-h-[280px] overflow-y-auto p-1">
+        {loading && (
+          <div className="px-3 py-4 text-xs text-muted-foreground">Loading segments…</div>
+        )}
+        {!loading &&
+          filtered.map((s) => {
+            const on = selected.includes(s.id)
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => toggle(s.id)}
+                className={cn(
+                  'flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors',
+                  on ? 'bg-muted/60' : 'hover:bg-muted/40'
+                )}
+              >
+                <Checkbox checked={on} aria-hidden tabIndex={-1} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12.5px] font-medium">{s.name}</div>
+                  {s.description && (
+                    <div className="truncate text-[11px] text-muted-foreground">
+                      {s.description}
+                    </div>
+                  )}
+                </div>
+                <span className="inline-flex items-center gap-1 font-mono text-[11px] tabular-nums text-muted-foreground">
+                  <UsersIcon className="h-2.5 w-2.5" />
+                  {s.count}
+                </span>
+              </button>
+            )
+          })}
+        {!loading && filtered.length === 0 && (
+          <Link
+            to="/admin/settings/people"
+            className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-3 text-xs text-foreground hover:bg-muted"
+          >
+            <PlusIcon className="h-3 w-3" />
+            <span>
+              Create segment{' '}
+              <span className="font-medium text-primary">&quot;{search || 'new'}&quot;</span>
+            </span>
+          </Link>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between border-t bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <UsersIcon className="h-2.5 w-2.5" />
+          <span>Reach:</span>
+          <span className="font-mono font-medium text-foreground">≈ {totalReach}</span>
+          <span className="opacity-50">·</span>
+          <span>
+            {selected.length}/{allSegments.length} selected
+          </span>
+        </span>
+        <Link to="/admin/settings/people" className="text-primary hover:underline">
+          Manage →
+        </Link>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+// ─── Sticky save dock ────────────────────────────────────────────────
+
+interface SaveDockProps {
+  dirty: boolean
+  error: boolean
+  saving: boolean
+  onDiscard: () => void
+}
+
+function SaveDock({ dirty, error, saving, onDiscard }: SaveDockProps) {
+  return (
+    <div
+      role="region"
+      aria-label="Save changes"
+      data-dirty={dirty || undefined}
+      className={cn(
+        'fixed inset-x-0 bottom-0 z-40 border-t bg-background/85 backdrop-blur-sm transition-transform duration-200',
+        dirty ? 'translate-y-0' : 'pointer-events-none translate-y-full'
+      )}
+    >
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3 sm:pl-72">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span
+            className={cn(
+              'inline-block h-2 w-2 rounded-full',
+              error ? 'bg-destructive' : 'bg-primary'
             )}
+            style={
+              error
+                ? { boxShadow: '0 0 8px rgba(248, 113, 113, 0.6)' }
+                : { boxShadow: '0 0 8px rgba(250, 204, 21, 0.6)' }
+            }
           />
-          <FormField
-            control={form.control}
-            name="approval.comments"
-            render={({ field }) => (
-              <FormItem className="flex items-center gap-2 space-y-0">
-                <FormControl>
-                  <Checkbox
-                    checked={field.value}
-                    onCheckedChange={(v) => field.onChange(v === true)}
-                  />
-                </FormControl>
-                <FormLabel className="text-sm font-normal cursor-pointer">
-                  Hold new comments for review
-                </FormLabel>
-              </FormItem>
-            )}
-          />
+          {error
+            ? 'Some rules use Segments but no segments are selected.'
+            : 'You have unsaved changes.'}
         </div>
-
-        <div className="space-y-2 text-xs text-muted-foreground">
-          <p>Team members and admins always have full access.</p>
-        </div>
-
-        <div className="flex justify-end">
-          <Button type="submit" disabled={mutation.isPending || needsSegments}>
-            {mutation.isPending ? 'Saving...' : 'Save changes'}
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={onDiscard} disabled={saving}>
+            Discard
+          </Button>
+          <Button type="submit" size="sm" disabled={error || saving}>
+            {saving ? 'Saving…' : 'Save changes'}
           </Button>
         </div>
-      </form>
-    </Form>
+      </div>
+    </div>
   )
 }
