@@ -10,6 +10,7 @@
 
 import {
   db,
+  changelogBoards,
   changelogEntries,
   changelogEntryPosts,
   posts,
@@ -17,6 +18,7 @@ import {
   postStatuses,
   eq,
   and,
+  asc,
   isNull,
   inArray,
 } from '@/lib/server/db'
@@ -30,10 +32,36 @@ import type {
   CreateChangelogInput,
   UpdateChangelogInput,
   ChangelogEntryWithDetails,
+  ChangelogBoardSummary,
   PublishState,
   ChangelogAuthor,
   ChangelogLinkedPost,
 } from './changelog.types'
+
+// ============================================================================
+// Boards
+// ============================================================================
+
+/**
+ * List changelog boards (non-deleted), ordered by position.
+ * Used by the admin board picker and board-scoped listing.
+ */
+export async function listChangelogBoards(): Promise<ChangelogBoardSummary[]> {
+  const rows = await db
+    .select({
+      id: changelogBoards.id,
+      slug: changelogBoards.slug,
+      name: changelogBoards.name,
+      description: changelogBoards.description,
+      isPublic: changelogBoards.isPublic,
+      position: changelogBoards.position,
+    })
+    .from(changelogBoards)
+    .where(isNull(changelogBoards.deletedAt))
+    .orderBy(asc(changelogBoards.position))
+
+  return rows
+}
 
 // ============================================================================
 // Create
@@ -77,6 +105,7 @@ export async function createChangelog(
   const [entry] = await db
     .insert(changelogEntries)
     .values({
+      boardId: input.boardId,
       title,
       content,
       contentJson,

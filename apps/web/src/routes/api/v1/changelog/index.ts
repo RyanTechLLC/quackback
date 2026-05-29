@@ -11,10 +11,11 @@ import { createChangelog } from '@/lib/server/domains/changelog/changelog.servic
 import { listChangelogs } from '@/lib/server/domains/changelog/changelog.query'
 import { publishedAtToPublishState } from '@/lib/shared/schemas/changelog'
 import { db, principal, eq } from '@/lib/server/db'
-import type { PostId } from '@quackback/ids'
+import type { PostId, ChangelogBoardId } from '@quackback/ids'
 
 // Input validation schema
 const createChangelogSchema = z.object({
+  boardId: z.string().min(1, 'A changelog board is required'),
   title: z.string().min(1, 'Title is required').max(200),
   content: z.string().min(1, 'Content is required'),
   publishedAt: z.string().datetime().optional(),
@@ -98,6 +99,7 @@ export const Route = createFileRoute('/api/v1/changelog/')({
 
           const entry = await createChangelog(
             {
+              boardId: parsed.data.boardId as ChangelogBoardId,
               title: parsed.data.title,
               content: parsed.data.content,
               publishState,

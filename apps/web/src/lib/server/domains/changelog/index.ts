@@ -11,6 +11,7 @@ export type {
   UpdateChangelogInput,
   PublishState,
   ListChangelogParams,
+  ChangelogBoardSummary,
   ChangelogEntryWithDetails,
   ChangelogListResult,
   ChangelogAuthor,

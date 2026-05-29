@@ -3,7 +3,7 @@
  */
 
 import type { TiptapContent } from '@/lib/server/db'
-import type { ChangelogId, PrincipalId, PostId } from '@quackback/ids'
+import type { ChangelogId, ChangelogBoardId, PrincipalId, PostId } from '@quackback/ids'
 import type { PublishState } from '@/lib/shared/schemas/changelog'
 
 export type { PublishState } from '@/lib/shared/schemas/changelog'
@@ -16,6 +16,8 @@ export type { PublishState } from '@/lib/shared/schemas/changelog'
  * Input for creating a new changelog entry
  */
 export interface CreateChangelogInput {
+  /** Board this entry belongs to (drives public/private visibility) */
+  boardId: ChangelogBoardId
   title: string
   content: string
   contentJson?: TiptapContent | null
@@ -53,6 +55,18 @@ export interface ListChangelogParams {
 // ============================================================================
 // Output Types
 // ============================================================================
+
+/**
+ * Changelog board summary (used by the board picker + admin lists)
+ */
+export interface ChangelogBoardSummary {
+  id: ChangelogBoardId
+  slug: string
+  name: string
+  description: string | null
+  isPublic: boolean
+  position: number
+}
 
 /**
  * Changelog entry with author and linked posts (admin view)

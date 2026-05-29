@@ -9,6 +9,7 @@ import type { ChangelogId } from '@quackback/ids'
 import {
   listChangelogsFn,
   getChangelogFn,
+  listChangelogBoardsFn,
   listPublicChangelogsFn,
   getPublicChangelogFn,
 } from '@/lib/server/functions/changelog'
@@ -21,6 +22,7 @@ const STALE_TIME_MEDIUM = 60 * 1000
  */
 export const changelogKeys = {
   all: ['changelogs'] as const,
+  boards: () => [...changelogKeys.all, 'boards'] as const,
   lists: () => [...changelogKeys.all, 'list'] as const,
   list: (filters: { status?: string }) => [...changelogKeys.lists(), filters] as const,
   details: () => [...changelogKeys.all, 'detail'] as const,
@@ -54,6 +56,13 @@ export const changelogQueries = {
     queryOptions({
       queryKey: changelogKeys.detail(id),
       queryFn: () => getChangelogFn({ data: { id } }),
+      staleTime: STALE_TIME_MEDIUM,
+    }),
+
+  boards: () =>
+    queryOptions({
+      queryKey: changelogKeys.boards(),
+      queryFn: () => listChangelogBoardsFn(),
       staleTime: STALE_TIME_MEDIUM,
     }),
 }

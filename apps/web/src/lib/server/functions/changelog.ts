@@ -5,7 +5,7 @@
  */
 
 import { createServerFn } from '@tanstack/react-start'
-import type { BoardId, ChangelogId, PostId } from '@quackback/ids'
+import type { BoardId, ChangelogId, ChangelogBoardId, PostId } from '@quackback/ids'
 // Note: BoardId is only used for searchShippedPosts filtering
 import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
 import { NotFoundError } from '@/lib/shared/errors'
@@ -16,6 +16,7 @@ import {
   updateChangelog,
   deleteChangelog,
   getChangelogById,
+  listChangelogBoards,
 } from '@/lib/server/domains/changelog/changelog.service'
 import { listChangelogs, searchShippedPosts } from '@/lib/server/domains/changelog/changelog.query'
 import {
@@ -55,6 +56,7 @@ export const createChangelogFn = createServerFn({ method: 'POST' })
 
       const entry = await createChangelog(
         {
+          boardId: data.boardId as ChangelogBoardId,
           title: data.title,
           content: data.content,
           contentJson: data.contentJson ? sanitizeTiptapContent(data.contentJson) : null,
@@ -78,6 +80,14 @@ export const createChangelogFn = createServerFn({ method: 'POST' })
       throw error
     }
   })
+
+/**
+ * List changelog boards for the admin board picker.
+ */
+export const listChangelogBoardsFn = createServerFn({ method: 'GET' }).handler(async () => {
+  await requireAuth({ roles: ['admin', 'member'] })
+  return listChangelogBoards()
+})
 
 /**
  * Update an existing changelog entry

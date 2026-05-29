@@ -20,6 +20,7 @@ export const publishStateSchema = z.discriminatedUnion('type', [
  * Create changelog input schema
  */
 export const createChangelogSchema = z.object({
+  boardId: z.string().min(1, 'A changelog board is required'),
   title: z.string().min(1).max(200),
   content: z.string(),
   contentJson: tiptapContentSchema.nullable().optional(),

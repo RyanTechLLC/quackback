@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { PlusIcon, Cog6ToothIcon } from '@heroicons/react/24/solid'
 import { Form } from '@/components/ui/form'
 import { ChangelogFormFields } from './changelog-form-fields'
+import { ChangelogBoardSelect } from './changelog-board-select'
 import { ChangelogMetadataSidebar } from './changelog-metadata-sidebar'
 import type { PublishState } from '@/lib/shared/schemas/changelog'
 import type { JSONContent } from '@tiptap/react'
@@ -35,12 +36,15 @@ export function CreateChangelogDialog({ onChangelogCreated }: CreateChangelogDia
   const form = useForm({
     resolver: standardSchemaResolver(createChangelogSchema),
     defaultValues: {
+      boardId: '',
       title: '',
       content: '',
       linkedPostIds: [] as string[],
       publishState: { type: 'draft' as const },
     },
   })
+
+  const boardId = form.watch('boardId')
 
   const handleContentChange = useCallback(
     (json: JSONContent, _html: string, markdown: string) => {
@@ -53,6 +57,7 @@ export function CreateChangelogDialog({ onChangelogCreated }: CreateChangelogDia
   const handleSubmit = form.handleSubmit((data) => {
     createChangelogMutation.mutate(
       {
+        boardId: data.boardId,
         title: data.title,
         content: data.content,
         contentJson: contentJson as TiptapContent | null,
@@ -120,6 +125,18 @@ export function CreateChangelogDialog({ onChangelogCreated }: CreateChangelogDia
             <div className="flex flex-1 min-h-0">
               {/* Left: Content editor */}
               <div className="flex-1 overflow-y-auto">
+                <div className="px-6 pt-6">
+                  <ChangelogBoardSelect
+                    value={boardId}
+                    onChange={(id) => form.setValue('boardId', id, { shouldValidate: true })}
+                    disabled={createChangelogMutation.isPending}
+                  />
+                  {form.formState.errors.boardId ? (
+                    <p className="mt-1.5 text-sm text-destructive">
+                      {form.formState.errors.boardId.message}
+                    </p>
+                  ) : null}
+                </div>
                 <ChangelogFormFields
                   form={form}
                   contentJson={contentJson}

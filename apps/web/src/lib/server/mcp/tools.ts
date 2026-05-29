@@ -96,6 +96,7 @@ import type {
   PrincipalId,
   CommentId,
   ChangelogId,
+  ChangelogBoardId,
   RoadmapId,
   FeedbackSuggestionId,
   MergeSuggestionId,
@@ -402,6 +403,7 @@ const proxyVoteSchema = {
 }
 
 const createChangelogSchema = {
+  boardId: z.string().describe('Changelog board TypeID (changelog_board_…) this entry belongs to'),
   title: z.string().max(200).describe('Changelog entry title'),
   content: z
     .string()
@@ -659,6 +661,7 @@ type ProxyVoteArgs = {
 }
 
 type CreateChangelogArgs = {
+  boardId: string
   title: string
   content: string
   publish: boolean
@@ -1181,6 +1184,7 @@ Examples:
           : ({ type: args.publish ? 'published' : 'draft' } as const)
         const result = await createChangelog(
           {
+            boardId: args.boardId as ChangelogBoardId,
             title: args.title,
             content: args.content,
             publishState,

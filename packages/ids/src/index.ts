@@ -78,6 +78,7 @@ export type {
   NoteId,
   RoadmapId,
   ChangelogId,
+  ChangelogBoardId,
   IntegrationId,
   PlatformCredentialId,
   EventMappingId,
