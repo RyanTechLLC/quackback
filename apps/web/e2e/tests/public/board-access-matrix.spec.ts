@@ -282,11 +282,12 @@ test.describe('vote tier — vote affordance + gating', () => {
   })
 })
 
-// ── Moderation: hold-for-review + approve / reject ──────────────────────────
-// e2e-mod holds both anonymous AND signed-in posts (anonPosts:on, signedPosts:on),
-// so we submit as the authenticated `user` (more robust than an anon session)
-// and moderate from the team `admin` page. The submitter sees their own pending
-// post, but a held post must NOT reach other (anonymous) viewers' feeds.
+// ── Moderation: hold-for-review + approve / reject (posts AND comments) ──────
+// e2e-mod holds anonymous + signed-in posts (anonPosts:on, signedPosts:on) and
+// comments (comments:on), so we submit as the authenticated `user` (more robust
+// than an anon session) and moderate from the team `admin` page. The submitter
+// sees their own pending item, but a held item must NOT reach other (anonymous)
+// viewers — until a moderator approves it.
 
 /** Submit a post to a board via the portal composer; resolves once accepted. */
 async function submitFeedback(page: Page, boardSlug: string, title: string) {
@@ -309,11 +310,40 @@ async function feedShowsPost(page: Page, boardSlug: string, title: string): Prom
   return (await page.locator('body').innerText()).includes(title)
 }
 
-/** The admin moderation-queue row (a <li>) for a pending item with this title. */
-async function queueRow(adminPage: Page, title: string) {
+/** The admin moderation-queue row (a <li>) for a pending item — matched by a
+ *  unique text (a post title, or a comment's body). Posts and comments render as
+ *  <li>s in the same queue, each carrying its own Approve/Reject buttons. */
+async function queueRow(adminPage: Page, uniqueText: string) {
   await adminPage.goto('/admin/moderation')
   await adminPage.waitForLoadState('networkidle')
-  return adminPage.locator('li').filter({ hasText: title }).first()
+  return adminPage.locator('li').filter({ hasText: uniqueText }).first()
+}
+
+/** Post a comment on a board's seeded post via the portal comment form. */
+async function submitComment(page: Page, board: { slug: string; postId: string }, text: string) {
+  await page.goto(`/b/${board.slug}/posts/${board.postId}`)
+  await page.waitForLoadState('networkidle')
+  const form = page
+    .locator('form')
+    .filter({ has: page.getByTestId('comment-form-editor') })
+    .first()
+  const editor = form.locator('[contenteditable="true"]').first()
+  await editor.click()
+  await editor.pressSequentially(text) // TipTap editor — type rather than fill
+  await form.getByRole('button', { name: /^comment$/i }).click()
+  await expect(editor).toHaveText('', { timeout: 10000 }) // form clears on success
+}
+
+/** Does the post detail show a comment containing this text (to the given actor)? */
+async function postShowsComment(
+  page: Page,
+  board: { slug: string; postId: string },
+  text: string
+): Promise<boolean> {
+  await page.goto(`/b/${board.slug}/posts/${board.postId}`)
+  await page.waitForLoadState('networkidle')
+  await page.waitForTimeout(600) // let comments settle
+  return (await page.locator('main, body').first().innerText()).includes(text)
 }
 
 test.describe('moderation — hold for review + approve/reject', () => {
@@ -345,5 +375,35 @@ test.describe('moderation — hold for review + approve/reject', () => {
 
     // Rejected → still hidden from the public feed.
     expect(await feedShowsPost(anon, 'e2e-mod', title)).toBe(false)
+  })
+
+  test('a held comment is approved onto the post', async () => {
+    const text = `E2E held comment approve ${Date.now()}`
+    await submitComment(user, fx.boards.mod, text)
+
+    // Held: the pending comment is not visible to other (anonymous) viewers.
+    expect(await postShowsComment(anon, fx.boards.mod, text)).toBe(false)
+
+    // It surfaces under the queue's pending comments; approving publishes it.
+    const row = await queueRow(admin, text)
+    await expect(row).toBeVisible({ timeout: 10000 })
+    await row.getByRole('button', { name: 'Approve' }).click()
+    await expect(row).toBeHidden({ timeout: 10000 })
+
+    // Now published → visible to anonymous viewers.
+    expect(await postShowsComment(anon, fx.boards.mod, text)).toBe(true)
+  })
+
+  test('a held comment is rejected and never shown', async () => {
+    const text = `E2E held comment reject ${Date.now()}`
+    await submitComment(user, fx.boards.mod, text)
+
+    const row = await queueRow(admin, text)
+    await expect(row).toBeVisible({ timeout: 10000 })
+    await row.getByRole('button', { name: 'Reject' }).click()
+    await expect(row).toBeHidden({ timeout: 10000 }) // soft-deleted, leaves the queue
+
+    // Rejected → still hidden on the post.
+    expect(await postShowsComment(anon, fx.boards.mod, text)).toBe(false)
   })
 })
