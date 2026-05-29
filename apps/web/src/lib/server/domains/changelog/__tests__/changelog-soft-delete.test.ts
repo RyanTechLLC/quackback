@@ -30,6 +30,9 @@ vi.mock('@/lib/server/db', () => ({
         findMany: (...args: unknown[]) => mockStatusesFindMany(...args),
       },
     },
+    // Subquery used by publicChangelogConditions to restrict to public boards.
+    // Chainable no-op — the mocked `inArray` just captures whatever it returns.
+    select: () => ({ from: () => ({ where: () => ['public_board_subquery'] }) }),
     update: () => ({
       set: (values: unknown) => {
         mockUpdateSet(values)
@@ -41,6 +44,11 @@ vi.mock('@/lib/server/db', () => ({
         }
       },
     }),
+  },
+  changelogBoards: {
+    id: { name: 'id' },
+    isPublic: { name: 'is_public' },
+    deletedAt: { name: 'deleted_at' },
   },
   changelogEntries: changelogEntriesTable,
   changelogEntryPosts: { changelogEntryId: 'changelog_entry_id' },

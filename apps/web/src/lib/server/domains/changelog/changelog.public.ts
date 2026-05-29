@@ -1,5 +1,6 @@
 import {
   db,
+  changelogBoards,
   changelogEntries,
   changelogEntryPosts,
   postStatuses,
@@ -28,6 +29,18 @@ export function publicChangelogConditions(now: Date) {
     isNull(changelogEntries.deletedAt),
     isNotNull(changelogEntries.publishedAt),
     lte(changelogEntries.publishedAt, now),
+    // Board visibility: only entries on a public, non-deleted board are
+    // exposed publicly. A private board (isPublic=false) is team/staff
+    // only — its entries must never surface in the public changelog,
+    // sitemap, or RSS feed. Centralizing this here covers every public
+    // read path that shares this helper.
+    inArray(
+      changelogEntries.boardId,
+      db
+        .select({ id: changelogBoards.id })
+        .from(changelogBoards)
+        .where(and(eq(changelogBoards.isPublic, true), isNull(changelogBoards.deletedAt)))
+    ),
   ]
 }
 

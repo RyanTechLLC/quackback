@@ -253,10 +253,12 @@ const FETCH_PUBLIC_TAGS = 7
 const FETCH_PUBLIC_ROADMAPS = 11
 const FETCH_PUBLIC_ROADMAP_POSTS = 12
 
-// Changelog handler indices
+// Changelog handler indices (definition order in functions/changelog.ts):
+// 0 create, 1 listBoards, 2 update, 3 delete, 4 get, 5 list,
+// 6 getPublic, 7 listPublic, 8 searchShipped
 const CHANGELOG = '@/lib/server/functions/changelog' as const
-const GET_PUBLIC_CHANGELOG = 5
-const LIST_PUBLIC_CHANGELOGS = 6
+const GET_PUBLIC_CHANGELOG = 6
+const LIST_PUBLIC_CHANGELOGS = 7
 
 // ---------------------------------------------------------------------------
 // portal.ts — fetchPortalData

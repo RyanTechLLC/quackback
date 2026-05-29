@@ -1282,7 +1282,7 @@ describe('MCP HTTP Handler', () => {
         mcpRequest(
           jsonRpcRequest('tools/call', {
             name: 'create_changelog',
-            arguments: { title: 'v1.0', content: 'New features' },
+            arguments: { boardId: 'changelog_board_test', title: 'v1.0', content: 'New features' },
           })
         )
       )
@@ -1498,7 +1498,7 @@ describe('MCP HTTP Handler', () => {
         oauthRequest(
           jsonRpcRequest('tools/call', {
             name: 'create_changelog',
-            arguments: { title: 'v1', content: 'New stuff' },
+            arguments: { boardId: 'changelog_board_test', title: 'v1', content: 'New stuff' },
           })
         )
       )
@@ -1852,7 +1852,7 @@ describe('MCP HTTP Handler', () => {
         mcpRequest(
           jsonRpcRequest('tools/call', {
             name: 'create_changelog',
-            arguments: { title: 'v1', content: 'New stuff' },
+            arguments: { boardId: 'changelog_board_test', title: 'v1', content: 'New stuff' },
           })
         )
       )

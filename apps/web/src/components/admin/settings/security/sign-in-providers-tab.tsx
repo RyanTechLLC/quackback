@@ -96,6 +96,14 @@ export function SignInProvidersTab({
   const passwordEnabled = !!oauthState.password
   const magicLinkEnabled = !!oauthState.magicLink
   const twoFactorRequired = teamAuthConfig.twoFactor?.required === true
+  // When the workspace's SSO IdP is configured + enabled, the dedicated
+  // `sso` provider already surfaces as a portal/team sign-in button, so the
+  // legacy Custom OIDC card is duplicate configuration surface (same IdP,
+  // two places to set it up). Hide it behind a deprecation banner once SSO
+  // is set up; keep it visible for tenants mid-migration so they aren't
+  // stranded. This is an admin-UI soft-hide only — existing
+  // `auth_custom-oidc` credentials continue to register at runtime.
+  const ssoEnabled = teamAuthConfig.ssoOidc?.enabled === true
 
   /** "Last method standing" guard — refuses to disable the only enabled
    *  provider so visitors and team admins aren't locked out. Counts only
@@ -354,20 +362,49 @@ export function SignInProvidersTab({
       {/* Card 3: Custom identity provider. The standalone team SSO
           connection still lives on /sso (linked from the Team access
           tab) — this card is the OIDC alternative for tenants who
-          prefer a bring-your-own provider to the SSO plugin flow. */}
-      <CustomOidcCard
-        configured={!!credentialStatus['custom-oidc']}
-        enabled={!!oauthState['custom-oidc']}
-        managed={isManaged('portalConfig.oauth.custom-oidc')}
-        lastMethod={isLastMethod('custom-oidc')}
-        tierEnabled={customOidcProviderTier}
-        saving={busy}
-        onToggle={(v) => void saveOauthProvider('custom-oidc', v)}
-        onConfigure={() => {
-          const provider = AUTH_PROVIDERS.find((p) => p.id === 'custom-oidc')
-          if (provider) openConfigDialog(provider)
-        }}
-      />
+          prefer a bring-your-own provider to the SSO plugin flow.
+
+          When the workspace has SSO configured, the dedicated `sso`
+          provider already surfaces as a sign-in button on both
+          surfaces, so this legacy card is duplicate configuration.
+          Replace it with a banner pointing at the unified SSO settings
+          page; keep the card for tenants who haven't set up SSO yet. */}
+      {ssoEnabled ? (
+        <div className="rounded-lg border border-border/50 bg-muted/30 p-4">
+          <div className="flex items-start gap-3">
+            <ShieldCheckIcon className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold">Single sign-on is your identity provider</h3>
+              <p className="text-sm text-muted-foreground">
+                Your workspace already has SSO configured under Single sign-on. The &ldquo;Continue
+                with&rdquo; button appears on the sign-in pages automatically — no separate Custom
+                OIDC configuration needed. Edit your identity provider once on the{' '}
+                <a
+                  href="/admin/settings/security/sso"
+                  className="font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  Single sign-on settings page
+                </a>
+                .
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <CustomOidcCard
+          configured={!!credentialStatus['custom-oidc']}
+          enabled={!!oauthState['custom-oidc']}
+          managed={isManaged('portalConfig.oauth.custom-oidc')}
+          lastMethod={isLastMethod('custom-oidc')}
+          tierEnabled={customOidcProviderTier}
+          saving={busy}
+          onToggle={(v) => void saveOauthProvider('custom-oidc', v)}
+          onConfigure={() => {
+            const provider = AUTH_PROVIDERS.find((p) => p.id === 'custom-oidc')
+            if (provider) openConfigDialog(provider)
+          }}
+        />
+      )}
 
       {busy && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
