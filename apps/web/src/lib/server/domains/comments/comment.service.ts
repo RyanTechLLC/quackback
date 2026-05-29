@@ -437,14 +437,6 @@ export async function deleteComment(
     throw new ForbiddenError('UNAUTHORIZED', 'You are not authorized to delete this comment')
   }
 
-  // Only decrement count if comment is not already soft-deleted
-  // (soft-delete already decremented the count).
-  // Private comments and held (pending) comments never incremented the count
-  // — pending comments are counted only on approval — so skip decrement for them.
-  const wasActive = !existingComment.deletedAt
-  const shouldDecrement =
-    wasActive && !existingComment.isPrivate && existingComment.moderationState !== 'pending'
-
   // Atomic transaction: delete comment + conditionally decrement comment count
   await db.transaction(async (tx) => {
     const result = await tx.delete(comments).where(eq(comments.id, id)).returning()
@@ -452,6 +444,14 @@ export async function deleteComment(
       throw new NotFoundError('COMMENT_NOT_FOUND', `Comment with ID ${id} not found`)
     }
 
+    // Decide the decrement from the deleted row's own state (DELETE locks the
+    // row), not the pre-transaction snapshot: a concurrent approval could have
+    // published + counted a previously-pending comment between the read and
+    // here. Skip when already soft-deleted (the soft-delete already decremented)
+    // or when the comment was never counted (private / still-pending).
+    const deleted = result[0]
+    const shouldDecrement =
+      !deleted.deletedAt && !deleted.isPrivate && deleted.moderationState !== 'pending'
     if (shouldDecrement) {
       await tx
         .update(posts)

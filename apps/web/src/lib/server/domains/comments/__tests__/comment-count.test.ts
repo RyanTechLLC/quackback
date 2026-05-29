@@ -16,6 +16,16 @@ const setCalls: unknown[] = []
 const deleteCalls: unknown[] = []
 let transactionUsed = false
 
+// State the soft-delete UPDATE / hard-delete DELETE returning row reflects. The
+// decrement decision reads moderationState/isPrivate from the LOCKED returning
+// row (race-correct vs a stale pre-transaction snapshot), so the held-comment
+// tests set this to 'pending'. Default 'published' → the decrement runs.
+const returnedComment: { moderationState: string; isPrivate: boolean; deletedAt: Date | null } = {
+  moderationState: 'published',
+  isPrivate: false,
+  deletedAt: null,
+}
+
 // Chainable mock builder for Drizzle query builder
 function createChainMock() {
   const chain: Record<string, unknown> = {}
@@ -25,7 +35,7 @@ function createChainMock() {
     return chain
   })
   chain.where = vi.fn().mockReturnValue(chain)
-  chain.returning = vi.fn().mockResolvedValue([
+  chain.returning = vi.fn(async () => [
     {
       id: 'comment_mock' as CommentId,
       postId: 'post_mock' as PostId,
@@ -33,8 +43,10 @@ function createChainMock() {
       parentId: null,
       principalId: 'principal_mock' as PrincipalId,
       isTeamMember: false,
+      isPrivate: returnedComment.isPrivate,
+      moderationState: returnedComment.moderationState,
       createdAt: new Date(),
-      deletedAt: null,
+      deletedAt: returnedComment.deletedAt,
       statusChangeFromId: null,
       statusChangeToId: null,
     },
@@ -192,6 +204,9 @@ describe('Comment count maintenance', () => {
     setCalls.length = 0
     deleteCalls.length = 0
     transactionUsed = false
+    returnedComment.moderationState = 'published'
+    returnedComment.isPrivate = false
+    returnedComment.deletedAt = null
     vi.clearAllMocks()
   })
 
@@ -359,6 +374,9 @@ describe('Comment count maintenance', () => {
       vi.mocked(db.query.comments.findFirst)
         .mockResolvedValueOnce(heldComment as never)
         .mockResolvedValueOnce(heldComment as never)
+      // The decrement decision reads the LOCKED returning row, so the held
+      // state must be reflected there (not just on the findFirst snapshot).
+      returnedComment.moderationState = 'pending'
 
       const { softDeleteComment } = await import('../comment.permissions')
       setCalls.length = 0
@@ -424,6 +442,9 @@ describe('Comment count maintenance', () => {
           board: { id: 'board_mock', slug: 'test' },
         },
       } as never)
+      // The decrement decision reads the deleted (locked) returning row, which
+      // for an already-soft-deleted comment carries its deletedAt timestamp.
+      returnedComment.deletedAt = new Date('2026-01-01')
 
       const { deleteComment } = await import('../comment.service')
       setCalls.length = 0
@@ -465,6 +486,8 @@ describe('Comment count maintenance', () => {
           board: { id: 'board_mock', slug: 'test' },
         },
       } as never)
+      // The decrement decision reads the deleted (locked) returning row.
+      returnedComment.moderationState = 'pending'
 
       const { deleteComment } = await import('../comment.service')
       setCalls.length = 0

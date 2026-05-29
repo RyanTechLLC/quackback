@@ -296,8 +296,12 @@ export async function softDeleteComment(
     // Private comments and held (pending) comments never incremented the count
     // — pending comments are counted only on approval (approveCommentFn) — so
     // deleting one before approval must not decrement, or it underflows the
-    // count of already-published comments.
-    const shouldDecrementCount = !comment.isPrivate && comment.moderationState !== 'pending'
+    // count of already-published comments. Read the state from the LOCKED
+    // returning row, not the pre-transaction snapshot: a concurrent approval
+    // could have published + counted a previously-pending comment between the
+    // read above and this UPDATE.
+    const shouldDecrementCount =
+      !updatedComment.isPrivate && updatedComment.moderationState !== 'pending'
     const shouldUnpin = comment.post?.pinnedCommentId === commentId
 
     if (shouldDecrementCount || shouldUnpin) {

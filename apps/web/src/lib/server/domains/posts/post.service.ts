@@ -150,7 +150,9 @@ export async function createPost(
   if (!createDecision.allowed) {
     throw new ValidationError('POST_CREATE_DENIED', createDecision.reason)
   }
-  const moderationState: 'published' | 'pending' = createDecision.requiresApproval
+  // Provisional — recomputed authoritatively under the board row lock inside
+  // the transaction below (closes the TOCTOU across the image-rehost window).
+  let moderationState: 'published' | 'pending' = createDecision.requiresApproval
     ? 'pending'
     : 'published'
 
@@ -179,20 +181,32 @@ export async function createPost(
   })
 
   const post = await db.transaction(async (tx) => {
-    // Re-fetch the board with a row lock to close the TOCTOU window between
-    // the precheck above and the insert: an admin can soft-delete the board
-    // between the two, and the insert would otherwise land the post as a child
-    // of a deleted board (no FK violation — the row still exists, only
-    // deletedAt is set). SELECT ... FOR UPDATE blocks concurrent writers to
-    // the same row for the millisecond-scale lifetime of this transaction.
-    const lockedBoard = await tx
-      .select({ id: boards.id })
+    // Re-fetch the board (with its access matrix) under a row lock to close the
+    // TOCTOU between the precheck above and the insert. Two races are covered:
+    // (1) an admin soft-deletes the board — the insert would otherwise land the
+    // post under a deleted board (no FK violation; only deletedAt is set); and
+    // (2) an admin tightens the submit tier or flips moderation while the
+    // network-bound rehostExternalImages call above runs. SELECT ... FOR UPDATE
+    // serializes board writes for the transaction, so re-running canCreatePost
+    // against the locked access is decisive, and moderationState is derived
+    // from it rather than the stale precheck.
+    const [lockedBoard] = await tx
+      .select({ access: boards.access })
       .from(boards)
       .where(and(eq(boards.id, input.boardId), isNull(boards.deletedAt)))
       .for('update')
-    if (lockedBoard.length === 0) {
+    if (!lockedBoard) {
       throw new NotFoundError('BOARD_NOT_FOUND', `Board with ID ${input.boardId} not found`)
     }
+    const lockedDecision = canCreatePost(
+      author.actor ?? ANONYMOUS_ACTOR,
+      { access: lockedBoard.access },
+      portalConfig.moderationDefault.requireApproval
+    )
+    if (!lockedDecision.allowed) {
+      throw new ValidationError('POST_CREATE_DENIED', lockedDecision.reason)
+    }
+    moderationState = lockedDecision.requiresApproval ? 'pending' : 'published'
 
     const [newPost] = await tx
       .insert(posts)

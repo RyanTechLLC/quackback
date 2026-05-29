@@ -453,6 +453,10 @@ export const createPublicPostFn = createServerFn({ method: 'POST' })
           typeof settings.portalConfig === 'string'
             ? JSON.parse(settings.portalConfig)
             : settings.portalConfig
+        // Fail closed: a missing allowAnonymous flag denies anonymous posting
+        // (do not inherit getPortalConfig's default-true via the raw read).
+        // Matches migration 0084's fail-closed posture; the per-board submit
+        // tier is the inner gate and existing tenants carry an explicit value.
         if (!parsed?.features?.allowAnonymous) {
           throw new Error('Anonymous interaction is not enabled')
         }

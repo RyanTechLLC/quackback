@@ -14,11 +14,25 @@ const subscribeToPost = vi.fn()
 const dispatchPostCreated = vi.fn().mockResolvedValue(undefined)
 const syncPostMentions = vi.fn().mockResolvedValue(undefined)
 
+// Access matrix the locked-board re-check sees by default: fully anonymous with
+// inherit moderation, so the in-transaction canCreatePost re-check passes and
+// moderationState follows the workspace requireApproval mock (same as the
+// precheck board).
+const LOCKED_ANON_ACCESS = {
+  view: 'anonymous',
+  vote: 'anonymous',
+  comment: 'anonymous',
+  submit: 'anonymous',
+  segments: { view: [], vote: [], comment: [], submit: [] },
+  moderation: { anonPosts: 'inherit', signedPosts: 'inherit', comments: 'inherit' },
+}
+
 // Holder for what the in-transaction SELECT ... FOR UPDATE on boards returns.
-// Default: a single non-deleted row, which is what almost every test wants. The
-// TOCTOU test below mutates `.value` to simulate a concurrent soft-delete.
-const txLockedBoardRows: { value: Array<{ deletedAt: Date | null }> } = {
-  value: [{ deletedAt: null }],
+// Default: a single non-deleted row (with access), which is what almost every
+// test wants. The TOCTOU test below sets `.value = []` to simulate a concurrent
+// soft-delete (the locked SELECT filters isNull(deletedAt) → zero rows).
+const txLockedBoardRows: { value: Array<{ deletedAt: Date | null; access?: unknown }> } = {
+  value: [{ deletedAt: null, access: LOCKED_ANON_ACCESS }],
 }
 
 vi.mock('@/lib/server/db', async () => {
@@ -156,7 +170,7 @@ describe('createPost author attribution', () => {
     insertedRows.votes.length = 0
     insertedRows.postTags.length = 0
     subscribeToPost.mockClear()
-    txLockedBoardRows.value = [{ deletedAt: null }]
+    txLockedBoardRows.value = [{ deletedAt: null, access: LOCKED_ANON_ACCESS }]
   })
 
   it('attributes the post row, the auto-upvote, and the subscription to author.principalId', async () => {
@@ -188,7 +202,7 @@ describe('createPost held audit event', () => {
     insertedRows.postTags.length = 0
     subscribeToPost.mockClear()
     recordAuditEvent.mockClear()
-    txLockedBoardRows.value = [{ deletedAt: null }]
+    txLockedBoardRows.value = [{ deletedAt: null, access: LOCKED_ANON_ACCESS }]
   })
 
   it('records post.moderation.held when the post resolves to pending', async () => {
@@ -288,7 +302,7 @@ describe('createPost dispatch guard (moderation)', () => {
     recordAuditEvent.mockClear()
     dispatchPostCreated.mockClear()
     syncPostMentions.mockClear()
-    txLockedBoardRows.value = [{ deletedAt: null }]
+    txLockedBoardRows.value = [{ deletedAt: null, access: LOCKED_ANON_ACCESS }]
   })
 
   it('does NOT call dispatchPostCreated when the post is held (moderationState=pending)', async () => {
@@ -416,7 +430,7 @@ describe('createPost TOCTOU board re-check', () => {
     insertedRows.postTags.length = 0
     subscribeToPost.mockClear()
     rehostExternalImages.mockClear()
-    txLockedBoardRows.value = [{ deletedAt: null }]
+    txLockedBoardRows.value = [{ deletedAt: null, access: LOCKED_ANON_ACCESS }]
   })
 
   it('rejects a soft-deleted board in the precheck BEFORE rehostExternalImages runs (no S3 leak)', async () => {

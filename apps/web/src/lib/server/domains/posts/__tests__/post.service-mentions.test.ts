@@ -104,12 +104,28 @@ vi.mock('@/lib/server/db', async () => {
             return chain(typeof label === 'string' ? label : 'posts')
           }),
           // createPost runs SELECT ... FOR UPDATE on the board inside the txn
-          // to close the precheck/insert TOCTOU. Return a live (non-deleted)
-          // row so the existing tests below proceed past the guard.
+          // to close the precheck/insert TOCTOU, then re-runs canCreatePost on
+          // the locked access. Return a live row WITH access so the re-check
+          // passes (anonymous board → anyone can submit).
           select: vi.fn(() => ({
             from: vi.fn(() => ({
               where: vi.fn(() => ({
-                for: vi.fn(async () => [{ deletedAt: null }]),
+                for: vi.fn(async () => [
+                  {
+                    access: {
+                      view: 'anonymous',
+                      vote: 'anonymous',
+                      comment: 'anonymous',
+                      submit: 'anonymous',
+                      segments: { view: [], vote: [], comment: [], submit: [] },
+                      moderation: {
+                        anonPosts: 'inherit',
+                        signedPosts: 'inherit',
+                        comments: 'inherit',
+                      },
+                    },
+                  },
+                ]),
               })),
             })),
           })),
