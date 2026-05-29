@@ -16,6 +16,8 @@ export type {
   PortalAuthMethods,
   PortalFeatures,
   PortalConfig,
+  PortalAccessConfig,
+  PortalWelcomeCard,
   HeaderDisplayMode,
   ThemeColors,
   BrandingConfig,
@@ -31,6 +33,9 @@ export type {
   HelpCenterConfig,
   HelpCenterSeoConfig,
 } from './settings.types'
+
+// Welcome card constants (no DB dependency)
+export { PORTAL_WELCOME_CARD_TITLE_MAX } from './settings.types'
 
 // Default config values (no DB dependency)
 export {

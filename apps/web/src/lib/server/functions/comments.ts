@@ -9,6 +9,7 @@ import { isTeamMember } from '@/lib/shared/roles'
 import { createActivity } from '@/lib/server/domains/activity/activity.service'
 
 import { createComment } from '@/lib/server/domains/comments/comment.service'
+import { policyActorFromAuth } from './auth-helpers'
 import { addReaction, removeReaction } from '@/lib/server/domains/comments/comment.reactions'
 import {
   canDeleteComment,
@@ -29,6 +30,7 @@ import { getOptionalAuth, requireAuth, hasAuthCredentials } from './auth-helpers
 const createCommentSchema = z.object({
   postId: z.string(),
   content: z.string().min(1).max(5000),
+  contentJson: z.unknown().nullable().optional(),
   parentId: z.string().optional(),
   statusId: z.string().optional(),
   isPrivate: z.boolean().optional(),
@@ -46,6 +48,7 @@ const getCommentPermissionsSchema = z.object({
 const userEditCommentSchema = z.object({
   commentId: z.string(),
   content: z.string(),
+  contentJson: z.unknown().nullable().optional(),
 })
 
 const userDeleteCommentSchema = z.object({
@@ -72,6 +75,18 @@ export const createCommentFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     console.log(`[fn:comments] createCommentFn: postId=${data.postId}`)
     try {
+      // Portal-visibility gate: a denied caller (signed-in but not on
+      // the allowlist of a private portal) must not be able to comment.
+      // Matches createPublicPostFn / toggleVoteFn — read-side gating
+      // already runs at list / detail, the write surface needs it too
+      // or the caller could mutate from inside a portal they're not
+      // entitled to view. Dynamic import keeps the cycle out of static
+      // analysis (comments.ts ↔ portal-access.ts both pull from db).
+      const { resolvePortalAccessForRequest } = await import('./portal-access')
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        throw new Error('Portal access required')
+      }
       const auth = await requireAuth({ roles: ['admin', 'member', 'user'] })
 
       // Block anonymous users unless anonymousCommenting is enabled
@@ -83,10 +98,15 @@ export const createCommentFn = createServerFn({ method: 'POST' })
         }
       }
 
+      const actor = await policyActorFromAuth(auth)
+
       const result = await createComment(
         {
           postId: data.postId as PostId,
           content: data.content,
+          contentJson: (data.contentJson ?? undefined) as
+            | import('@/lib/shared/db-types').TiptapContent
+            | undefined,
           parentId: data.parentId as CommentId | undefined,
           statusId: data.statusId as StatusId | undefined,
           isPrivate: data.isPrivate,
@@ -97,7 +117,8 @@ export const createCommentFn = createServerFn({ method: 'POST' })
           name: auth.user.name,
           email: auth.user.email,
           role: auth.principal.role,
-        }
+        },
+        actor
       )
 
       // Events are dispatched by the service layer
@@ -115,8 +136,23 @@ export const addReactionFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     console.log(`[fn:comments] addReactionFn: commentId=${data.commentId}, emoji=${data.emoji}`)
     try {
+      // Portal-visibility gate — mirror createCommentFn / toggleVoteFn.
+      const { resolvePortalAccessForRequest } = await import('./portal-access')
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        throw new Error('Portal access required')
+      }
       const auth = await requireAuth({ roles: ['admin', 'member', 'user'] })
-      const result = await addReaction(data.commentId as CommentId, data.emoji, auth.principal.id)
+      // The reaction service now runs canViewPost + isPrivate using
+      // the actor; without that, an authenticated user could probe
+      // commentIds on team-only / private comments.
+      const actor = await policyActorFromAuth(auth)
+      const result = await addReaction(
+        data.commentId as CommentId,
+        data.emoji,
+        auth.principal.id,
+        actor
+      )
       console.log(`[fn:comments] addReactionFn: added=${result.added}`)
       return result
     } catch (error) {
@@ -130,11 +166,18 @@ export const removeReactionFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     console.log(`[fn:comments] removeReactionFn: commentId=${data.commentId}, emoji=${data.emoji}`)
     try {
+      const { resolvePortalAccessForRequest } = await import('./portal-access')
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        throw new Error('Portal access required')
+      }
       const auth = await requireAuth({ roles: ['admin', 'member', 'user'] })
+      const actor = await policyActorFromAuth(auth)
       const result = await removeReaction(
         data.commentId as CommentId,
         data.emoji,
-        auth.principal.id
+        auth.principal.id,
+        actor
       )
       console.log(`[fn:comments] removeReactionFn: removed`)
       return result
@@ -190,10 +233,29 @@ export const userEditCommentFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     console.log(`[fn:comments] userEditCommentFn: commentId=${data.commentId}`)
     try {
+      // Portal-visibility gate + per-comment audience gate. Same shape
+      // as the userEditPostFn / userDeletePostFn fixes: the existing
+      // canEditComment policy only checks authorship + lock state, so
+      // an authenticated portal user could mutate a comment on a
+      // team-only or segment-restricted board they had no business
+      // seeing (or commenting on after the audience change).
+      const { resolvePortalAccessForRequest } = await import('./portal-access')
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        throw new Error('Portal access required')
+      }
       const ctx = await requireAuth()
+      const { assertCommentViewable } = await import('@/lib/server/domains/posts/post.access')
+      const policyActor = await policyActorFromAuth(ctx)
+      await assertCommentViewable(data.commentId as CommentId, policyActor)
+
       const actor = { principalId: ctx.principal.id, role: ctx.principal.role }
 
-      const result = await userEditComment(data.commentId as CommentId, data.content, actor)
+      const result = await userEditComment(data.commentId as CommentId, data.content, actor, {
+        contentJson: (data.contentJson ?? undefined) as
+          | import('@/lib/shared/db-types').TiptapContent
+          | undefined,
+      })
       console.log(`[fn:comments] userEditCommentFn: edited id=${data.commentId}`)
       return result
     } catch (error) {
@@ -207,7 +269,16 @@ export const userDeleteCommentFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     console.log(`[fn:comments] userDeleteCommentFn: commentId=${data.commentId}`)
     try {
+      const { resolvePortalAccessForRequest } = await import('./portal-access')
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        throw new Error('Portal access required')
+      }
       const ctx = await requireAuth()
+      const { assertCommentViewable } = await import('@/lib/server/domains/posts/post.access')
+      const policyActor = await policyActorFromAuth(ctx)
+      await assertCommentViewable(data.commentId as CommentId, policyActor)
+
       const actor = { principalId: ctx.principal.id, role: ctx.principal.role }
 
       await softDeleteComment(data.commentId as CommentId, actor)

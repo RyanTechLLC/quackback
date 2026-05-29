@@ -5,6 +5,7 @@ import {
   postStatuses,
   eq,
   and,
+  isNull,
   isNotNull,
   lt,
   lte,
@@ -18,6 +19,19 @@ import { computeStatus } from './changelog.service'
 import type { PublicChangelogEntry, PublicChangelogListResult } from './changelog.types'
 
 /**
+ * Predicates that make a changelog entry publicly visible: not soft-deleted
+ * and published at or before `now`. Shared by every public read path so the
+ * filter stays consistent.
+ */
+export function publicChangelogConditions(now: Date) {
+  return [
+    isNull(changelogEntries.deletedAt),
+    isNotNull(changelogEntries.publishedAt),
+    lte(changelogEntries.publishedAt, now),
+  ]
+}
+
+/**
  * Get a published changelog entry by ID for public view
  *
  * @param id - Changelog entry ID
@@ -27,11 +41,7 @@ export async function getPublicChangelogById(id: ChangelogId): Promise<PublicCha
   const now = new Date()
 
   const entry = await db.query.changelogEntries.findFirst({
-    where: and(
-      eq(changelogEntries.id, id),
-      isNotNull(changelogEntries.publishedAt),
-      lte(changelogEntries.publishedAt, now)
-    ),
+    where: and(eq(changelogEntries.id, id), ...publicChangelogConditions(now)),
   })
 
   if (!entry || !entry.publishedAt) {
@@ -41,7 +51,8 @@ export async function getPublicChangelogById(id: ChangelogId): Promise<PublicCha
     )
   }
 
-  // Get linked posts with board slugs and status
+  // Get linked posts with board slugs, board audience, and status.
+  // `board.audience` is needed for the public-audience filter below.
   const allLinkedPostRecords = await db.query.changelogEntryPosts.findMany({
     where: eq(changelogEntryPosts.changelogEntryId, id),
     with: {
@@ -53,11 +64,13 @@ export async function getPublicChangelogById(id: ChangelogId): Promise<PublicCha
           boardId: true,
           statusId: true,
           deletedAt: true,
+          moderationState: true,
         },
         with: {
           board: {
             columns: {
               slug: true,
+              audience: true,
             },
           },
         },
@@ -65,8 +78,21 @@ export async function getPublicChangelogById(id: ChangelogId): Promise<PublicCha
     },
   })
 
-  // Exclude deleted posts from public changelog
-  const linkedPostRecords = allLinkedPostRecords.filter((lp) => !lp.post.deletedAt)
+  // Only published, non-deleted posts from public-audience boards may be
+  // exposed through the public changelog. Three independent guards:
+  //   1. moderationState='published' — a team member can link a post in
+  //      any moderation state, but pending/spam/archived/closed posts
+  //      are not for public consumption.
+  //   2. !deletedAt — a soft-deleted post must not leak.
+  //   3. board.audience.kind='public' — linking a team-only or
+  //      segment-restricted post must not promote it into the public
+  //      changelog feed.
+  const linkedPostRecords = allLinkedPostRecords.filter(
+    (lp) =>
+      !lp.post.deletedAt &&
+      lp.post.moderationState === 'published' &&
+      lp.post.board?.audience?.kind === 'public'
+  )
 
   // Get status info for linked posts
   const statusIds = new Set<StatusId>()
@@ -112,13 +138,14 @@ export async function listPublicChangelogs(params: {
   const { cursor, limit = 20 } = params
   const now = new Date()
 
-  // Build where conditions - only published entries
-  const conditions = [
-    isNotNull(changelogEntries.publishedAt),
-    lte(changelogEntries.publishedAt, now),
-  ]
+  const conditions = publicChangelogConditions(now)
 
-  // Cursor-based pagination
+  // Cursor-based pagination. The lookup does NOT filter on deletedAt:
+  // if an admin deleted the cursor row between page load and "Load
+  // more", we still want its prior publishedAt to anchor the next page
+  // so the user doesn't get duplicates / a stuck list. The main
+  // results query below applies the full visibility filter, so the
+  // deleted row itself stays out of the returned items.
   if (cursor) {
     const cursorEntry = await db.query.changelogEntries.findFirst({
       where: eq(changelogEntries.id, cursor as ChangelogId),
@@ -162,11 +189,13 @@ export async function listPublicChangelogs(params: {
                 boardId: true,
                 statusId: true,
                 deletedAt: true,
+                moderationState: true,
               },
               with: {
                 board: {
                   columns: {
                     slug: true,
+                    audience: true,
                   },
                 },
               },
@@ -174,7 +203,15 @@ export async function listPublicChangelogs(params: {
           },
         })
       : []
-  ).filter((lp) => !lp.post.deletedAt)
+  ).filter(
+    // Same three-guard filter as getPublicChangelogById — see the comment
+    // there. The audience check keeps team-only / segment-restricted
+    // posts out of the public changelog feed.
+    (lp) =>
+      !lp.post.deletedAt &&
+      lp.post.moderationState === 'published' &&
+      lp.post.board?.audience?.kind === 'public'
+  )
 
   // Group linked posts by changelog entry
   const linkedPostsMap = new Map<ChangelogId, typeof allLinkedPosts>()

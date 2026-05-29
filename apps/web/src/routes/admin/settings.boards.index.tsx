@@ -29,7 +29,7 @@ interface BoardForSettings {
   name: string
   slug: string
   description: string | null
-  isPublic: boolean
+  audience: import('@/lib/shared/db-types').BoardAudience
 }
 
 const searchSchema = z.object({
@@ -111,7 +111,7 @@ function BoardTabContent({ board, tab }: BoardTabContentProps): ReactNode {
     case 'access':
       return (
         <SettingsCard title="Access Control">
-          <BoardAccessForm board={board} />
+          <BoardAccessForm key={board.id} board={board} />
         </SettingsCard>
       )
 

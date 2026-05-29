@@ -125,6 +125,8 @@ export {
   user,
   userRelations,
   verification,
+  widgetOriginSession,
+  widgetIdentifiedSession,
   // Schema tables - boards
   boards,
   boardsRelations,
@@ -146,6 +148,8 @@ export {
   commentsRelations,
   postEditHistory,
   postEditHistoryRelations,
+  postMentions,
+  postMentionsRelations,
   postNotes,
   postNotesRelations,
   postRoadmaps,

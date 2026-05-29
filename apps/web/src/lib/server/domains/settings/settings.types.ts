@@ -5,6 +5,8 @@
  * This allows adding new settings without migrations.
  */
 
+import type { TiptapContent } from '@/lib/shared/db-types'
+
 // =============================================================================
 // Auth Configuration (Team sign-in settings)
 // =============================================================================
@@ -100,23 +102,6 @@ export interface AuthConfig {
    * existing tenants pre-migration aren't suddenly locked out.
    */
   twoFactor?: { required: boolean }
-  /**
-   * Security defaults that span all team auth methods. Per-workspace
-   * toggles so admins with stringent compliance / audit-noise
-   * constraints can opt out of the default-on behaviour. Self-hosters
-   * who don't have email delivery configured can also turn this off
-   * to silence dev-mode console logging.
-   */
-  security?: {
-    /**
-     * Send the workspace owner an email when their account signs in
-     * from a previously-unseen device (UA + /24 IP subnet bucket).
-     * First-line defense against credential compromise — the user
-     * notices an unfamiliar sign-in and can revoke the session.
-     * Default `true`.
-     */
-    notifyOnNewSignIn?: boolean
-  }
 }
 
 /**
@@ -192,14 +177,6 @@ export interface PortalAuthMethods {
  * Portal feature toggles
  */
 export interface PortalFeatures {
-  /** Whether unauthenticated users can view the portal */
-  publicView: boolean
-  /** Whether portal users can submit new posts */
-  submissions: boolean
-  /** Whether portal users can comment on posts */
-  comments: boolean
-  /** Whether portal users can vote on posts */
-  voting: boolean
   /** Whether unauthenticated visitors can vote without signing in */
   anonymousVoting: boolean
   /** Whether unauthenticated visitors can comment without signing in */
@@ -212,10 +189,52 @@ export interface PortalFeatures {
   allowDeleteAfterEngagement: boolean
   /** Show public edit history on posts */
   showPublicEditHistory: boolean
-  /** Whether rich media (images, tables, embeds) is enabled in the admin post editor */
-  richMediaInPosts?: boolean
-  /** Whether YouTube/video embeds are enabled in the admin post editor (only applies when richMediaInPosts is true) */
-  videoEmbedsInPosts?: boolean
+}
+
+/**
+ * Workspace-wide post-approval policy. Applies to every board — there is
+ * no per-board override.
+ */
+export interface ModerationDefault {
+  requireApproval: 'none' | 'anonymous' | 'authenticated' | 'all'
+}
+
+/**
+ * Welcome card shown above the post list on the portal index.
+ * Title is plain text (server trims + caps at 120 chars). Body is
+ * sanitized TipTap JSON — same shape as post / help-center content,
+ * sanitized via `sanitizeTiptapContent` on every write.
+ *
+ * Default off. Renders only when `enabled` and at least one of
+ * `title` / `body` has content.
+ */
+export interface PortalWelcomeCard {
+  enabled: boolean
+  /** Plain text. Server trims and rejects > 120 chars. */
+  title: string
+  /** Sanitized TipTap JSON doc. */
+  body: TiptapContent
+}
+
+/** Max length of {@link PortalWelcomeCard.title} after trimming. */
+export const PORTAL_WELCOME_CARD_TITLE_MAX = 120
+
+/**
+ * Portal-level access control settings.
+ *
+ * `allowedDomains`, `widgetSignIn`, and `allowedSegmentIds` are server-only
+ * policy. They are read by `evaluateMyPortalAccessFn` server-side and never
+ * serialized into the router context or any client payload. The router context
+ * carries only `visibility` from this shape (redacted in `__root.tsx`).
+ */
+export interface PortalAccessConfig {
+  visibility: 'public' | 'private'
+  /** Email domains whose verified users are automatically granted access. */
+  allowedDomains: string[]
+  /** Whether widget-authenticated users may access a private portal. */
+  widgetSignIn: boolean
+  /** Server-only policy. Segments whose members can access a private portal. */
+  allowedSegmentIds: string[]
 }
 
 /**
@@ -227,6 +246,12 @@ export interface PortalConfig {
   oauth: PortalAuthMethods
   /** Feature toggles */
   features: PortalFeatures
+  /** Welcome card on the portal index. Optional — absent = disabled. */
+  welcomeCard?: PortalWelcomeCard
+  /** Workspace-wide approval policy; applies to every board. */
+  moderationDefault: ModerationDefault
+  /** Portal-level access control (visibility gate). */
+  access?: PortalAccessConfig
 }
 
 /**
@@ -240,10 +265,6 @@ export const DEFAULT_PORTAL_CONFIG: PortalConfig = {
     github: true,
   },
   features: {
-    publicView: true,
-    submissions: true,
-    comments: true,
-    voting: true,
     allowEditAfterEngagement: false,
     allowDeleteAfterEngagement: false,
     showPublicEditHistory: false,
@@ -251,6 +272,13 @@ export const DEFAULT_PORTAL_CONFIG: PortalConfig = {
     anonymousCommenting: false,
     anonymousPosting: false,
   },
+  welcomeCard: {
+    enabled: false,
+    title: '',
+    body: { type: 'doc', content: [{ type: 'paragraph' }] },
+  },
+  moderationDefault: { requireApproval: 'none' },
+  access: { visibility: 'public', allowedDomains: [], widgetSignIn: false, allowedSegmentIds: [] },
 }
 
 // =============================================================================
@@ -471,7 +499,6 @@ export interface UpdateAuthConfigInput {
   openSignup?: boolean
   ssoOidc?: Partial<NonNullable<AuthConfig['ssoOidc']>>
   twoFactor?: Partial<NonNullable<AuthConfig['twoFactor']>>
-  security?: Partial<NonNullable<AuthConfig['security']>>
 }
 
 /**
@@ -480,6 +507,9 @@ export interface UpdateAuthConfigInput {
 export interface UpdatePortalConfigInput {
   oauth?: Partial<PortalAuthMethods>
   features?: Partial<PortalFeatures>
+  welcomeCard?: Partial<PortalWelcomeCard>
+  moderationDefault?: ModerationDefault
+  access?: Partial<PortalAccessConfig>
 }
 
 // =============================================================================
@@ -502,6 +532,14 @@ export interface PublicPortalConfig {
   features: PortalFeatures
   /** Display name overrides for generic OAuth providers (e.g. sso → "Okta") */
   customProviderNames?: Record<string, string>
+  /** Welcome card on the portal index. Absent / disabled = nothing rendered. */
+  welcomeCard?: PortalWelcomeCard
+  /**
+   * Client-safe access control indicator. `isPrivate` and `widgetSignIn`
+   * are exposed so the widget can decide whether to show the "Go to portal"
+   * CTA. `allowedDomains` remains server-only.
+   */
+  portalAccess?: { isPrivate: boolean; widgetSignIn: boolean }
 }
 
 // =============================================================================

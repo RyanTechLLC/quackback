@@ -9,6 +9,7 @@ import {
 } from 'better-auth/client/plugins'
 import { isSafeCallbackUrl } from '@/lib/shared/routing'
 import { SESSION_TOKEN_COOKIE_NAME } from '@/lib/shared/auth-cookie'
+import { detectAuthBlockRedirect } from './redirect-errors'
 
 /**
  * sessionStorage key for the post-2FA destination URL.
@@ -96,6 +97,14 @@ export function resolveTwoFactorDest(
  * Note: No baseURL needed - Better Auth client defaults to current origin
  */
 export const authClient = createAuthClient({
+  fetchOptions: {
+    onResponse: async (ctx) => {
+      // See redirect-errors.ts for the why — surfaces pre-check 302s
+      // as throwable errors instead of letting them resolve as null.
+      const blocked = detectAuthBlockRedirect(ctx.response)
+      if (blocked) throw blocked
+    },
+  },
   plugins: [
     anonymousClient(),
     emailOTPClient(),

@@ -51,6 +51,7 @@ vi.mock('@/lib/server/domains/settings/settings.service', () => ({
     .fn()
     .mockResolvedValue({ mcpEnabled: true, mcpPortalAccessEnabled: false }),
   getTenantSettings: vi.fn().mockResolvedValue(null),
+  isFeatureEnabled: vi.fn().mockResolvedValue(true),
 }))
 
 // Mock config so baseUrl is available (used in WWW-Authenticate header)
@@ -88,6 +89,10 @@ vi.mock('@/lib/server/domains/posts/post.query', () => ({
     updatedAt: new Date('2026-01-01'),
   }),
   getCommentsWithReplies: vi.fn().mockResolvedValue([]),
+}))
+
+vi.mock('@/lib/server/domains/segments/segment-membership.service', () => ({
+  segmentIdsForPrincipal: vi.fn(async () => new Set()),
 }))
 
 vi.mock('@/lib/server/domains/posts/post.service', () => ({
@@ -1020,6 +1025,7 @@ describe('MCP HTTP Handler', () => {
       // Verify isPrivate was passed through to the service
       expect(mockCreateComment).toHaveBeenCalledWith(
         expect.objectContaining({ isPrivate: true }),
+        expect.any(Object),
         expect.any(Object)
       )
     })
@@ -1601,6 +1607,175 @@ describe('MCP HTTP Handler', () => {
       }
       expect(body.result.isError).toBe(true)
       expect(body.result.content[0].text).toContain('write:feedback')
+    })
+
+    it('should deny search posts for OAuth portal user (inbox is team-only)', async () => {
+      const { getDeveloperConfig } = await import('@/lib/server/domains/settings/settings.service')
+      vi.mocked(getDeveloperConfig).mockResolvedValueOnce({
+        mcpEnabled: true,
+        mcpPortalAccessEnabled: true,
+      })
+      const handleMcpRequest = await initializeOAuthSession(['read:feedback'])
+      await setupValidOAuth({
+        role: 'user',
+        scopes: ['read:feedback'],
+      })
+      vi.mocked(getDeveloperConfig).mockResolvedValueOnce({
+        mcpEnabled: true,
+        mcpPortalAccessEnabled: true,
+      })
+
+      const response = await handleMcpRequest(
+        oauthRequest(
+          jsonRpcRequest('tools/call', {
+            name: 'search',
+            arguments: { query: 'test' },
+          })
+        )
+      )
+
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as {
+        result: { isError: boolean; content: Array<{ text: string }> }
+      }
+      expect(body.result.isError).toBe(true)
+      expect(body.result.content[0].text).toContain('team member')
+    })
+
+    it('should deny get_details(post) for OAuth portal user (inbox is team-only)', async () => {
+      const { getDeveloperConfig } = await import('@/lib/server/domains/settings/settings.service')
+      vi.mocked(getDeveloperConfig).mockResolvedValueOnce({
+        mcpEnabled: true,
+        mcpPortalAccessEnabled: true,
+      })
+      const handleMcpRequest = await initializeOAuthSession(['read:feedback'])
+      await setupValidOAuth({
+        role: 'user',
+        scopes: ['read:feedback'],
+      })
+      vi.mocked(getDeveloperConfig).mockResolvedValueOnce({
+        mcpEnabled: true,
+        mcpPortalAccessEnabled: true,
+      })
+
+      const response = await handleMcpRequest(
+        oauthRequest(
+          jsonRpcRequest('tools/call', {
+            name: 'get_details',
+            arguments: { id: 'post_01jx0p1q3rh0d8t5a8j4f7y3p9' },
+          })
+        )
+      )
+
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as {
+        result: { isError: boolean; content: Array<{ text: string }> }
+      }
+      expect(body.result.isError).toBe(true)
+      expect(body.result.content[0].text).toContain('team member')
+    })
+
+    it('should deny search(articles) for OAuth portal user (help center MCP is team-only)', async () => {
+      const { getDeveloperConfig } = await import('@/lib/server/domains/settings/settings.service')
+      const { isFeatureEnabled } = await import('@/lib/server/domains/settings/settings.service')
+      vi.mocked(isFeatureEnabled).mockResolvedValue(true)
+      vi.mocked(getDeveloperConfig).mockResolvedValueOnce({
+        mcpEnabled: true,
+        mcpPortalAccessEnabled: true,
+      })
+      const handleMcpRequest = await initializeOAuthSession(['read:help-center'])
+      await setupValidOAuth({
+        role: 'user',
+        scopes: ['read:help-center'],
+      })
+      vi.mocked(getDeveloperConfig).mockResolvedValueOnce({
+        mcpEnabled: true,
+        mcpPortalAccessEnabled: true,
+      })
+
+      const response = await handleMcpRequest(
+        oauthRequest(
+          jsonRpcRequest('tools/call', {
+            name: 'search',
+            arguments: { entity: 'articles', query: 'getting started' },
+          })
+        )
+      )
+
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as {
+        result: { isError: boolean; content: Array<{ text: string }> }
+      }
+      expect(body.result.isError).toBe(true)
+      expect(body.result.content[0].text).toContain('team member')
+    })
+
+    it('should deny get_details(article) for OAuth portal user (help center MCP is team-only)', async () => {
+      const { getDeveloperConfig } = await import('@/lib/server/domains/settings/settings.service')
+      const { isFeatureEnabled } = await import('@/lib/server/domains/settings/settings.service')
+      vi.mocked(isFeatureEnabled).mockResolvedValue(true)
+      vi.mocked(getDeveloperConfig).mockResolvedValueOnce({
+        mcpEnabled: true,
+        mcpPortalAccessEnabled: true,
+      })
+      const handleMcpRequest = await initializeOAuthSession(['read:help-center'])
+      await setupValidOAuth({
+        role: 'user',
+        scopes: ['read:help-center'],
+      })
+      vi.mocked(getDeveloperConfig).mockResolvedValueOnce({
+        mcpEnabled: true,
+        mcpPortalAccessEnabled: true,
+      })
+
+      const response = await handleMcpRequest(
+        oauthRequest(
+          jsonRpcRequest('tools/call', {
+            name: 'get_details',
+            arguments: { id: 'article_01jx0p1q3rh0d8t5a8j4f7y3p9' },
+          })
+        )
+      )
+
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as {
+        result: { isError: boolean; content: Array<{ text: string }> }
+      }
+      expect(body.result.isError).toBe(true)
+      expect(body.result.content[0].text).toContain('team member')
+    })
+
+    it('should deny get_details(changelog) for OAuth portal user (drafts/scheduled are team-only)', async () => {
+      const { getDeveloperConfig } = await import('@/lib/server/domains/settings/settings.service')
+      vi.mocked(getDeveloperConfig).mockResolvedValueOnce({
+        mcpEnabled: true,
+        mcpPortalAccessEnabled: true,
+      })
+      const handleMcpRequest = await initializeOAuthSession(['read:feedback'])
+      await setupValidOAuth({
+        role: 'user',
+        scopes: ['read:feedback'],
+      })
+      vi.mocked(getDeveloperConfig).mockResolvedValueOnce({
+        mcpEnabled: true,
+        mcpPortalAccessEnabled: true,
+      })
+
+      const response = await handleMcpRequest(
+        oauthRequest(
+          jsonRpcRequest('tools/call', {
+            name: 'get_details',
+            arguments: { id: 'changelog_01jx0p1q3rh0d8t5a8j4f7y3p9' },
+          })
+        )
+      )
+
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as {
+        result: { isError: boolean; content: Array<{ text: string }> }
+      }
+      expect(body.result.isError).toBe(true)
+      expect(body.result.content[0].text).toContain('team member')
     })
 
     it('should deny search showDeleted for OAuth portal user (role enforcement)', async () => {

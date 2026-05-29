@@ -3,7 +3,8 @@
  * The import handler's override flips this when authorPrincipalId is given.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CommentId, PostId, PrincipalId } from '@quackback/ids'
+import type { CommentId, PostId, PrincipalId, SegmentId } from '@quackback/ids'
+import type { Actor } from '@/lib/server/policy/types'
 
 const insertedComments: Record<string, unknown>[] = []
 
@@ -58,7 +59,13 @@ vi.mock('@/lib/server/db', async () => {
             boardId: 'board_b',
             statusId: 'status_open',
             isCommentsLocked: false,
-            board: { id: 'board_b', slug: 'b' },
+            moderationState: 'published',
+            principalId: null,
+            board: {
+              id: 'board_b',
+              slug: 'b',
+              audience: { kind: 'public' },
+            },
           }),
         },
         comments: { findFirst: vi.fn(), findMany: vi.fn().mockResolvedValue([]) },
@@ -91,6 +98,21 @@ vi.mock('@/lib/server/events/dispatch', () => ({
   buildEventActor: vi.fn(() => ({})),
 }))
 
+// A minimal team actor sufficient for all three tests (public board, published post)
+const teamActor: Actor = {
+  principalId: 'principal_admin' as unknown as PrincipalId,
+  role: 'admin',
+  principalType: 'user',
+  segmentIds: new Set<SegmentId>(),
+}
+
+const portalActor: Actor = {
+  principalId: 'principal_uv' as unknown as PrincipalId,
+  role: 'user',
+  principalType: 'user',
+  segmentIds: new Set<SegmentId>(),
+}
+
 describe('createComment isTeamMember derivation', () => {
   beforeEach(() => {
     insertedComments.length = 0
@@ -101,6 +123,7 @@ describe('createComment isTeamMember derivation', () => {
     await createComment(
       { postId: 'post_p' as unknown as PostId, content: 'Hi' },
       { principalId: 'principal_admin' as unknown as PrincipalId, role: 'admin' },
+      teamActor,
       { skipDispatch: true }
     )
     expect(insertedComments[0]).toMatchObject({ isTeamMember: true })
@@ -111,6 +134,7 @@ describe('createComment isTeamMember derivation', () => {
     await createComment(
       { postId: 'post_p' as unknown as PostId, content: 'Hi' },
       { principalId: 'principal_member' as unknown as PrincipalId, role: 'member' },
+      { ...teamActor, role: 'member', principalId: 'principal_member' as unknown as PrincipalId },
       { skipDispatch: true }
     )
     expect(insertedComments[0]).toMatchObject({ isTeamMember: true })
@@ -121,6 +145,7 @@ describe('createComment isTeamMember derivation', () => {
     await createComment(
       { postId: 'post_p' as unknown as PostId, content: 'Hi' },
       { principalId: 'principal_uv' as unknown as PrincipalId, role: 'user' },
+      portalActor,
       { skipDispatch: true }
     )
     expect(insertedComments[0]).toMatchObject({ isTeamMember: false })

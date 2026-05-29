@@ -179,6 +179,7 @@ function mergeSetupState(
     name?: string
     slug?: string
     useCase?: 'saas' | 'consumer' | 'marketplace' | 'internal'
+    onboardingComplete?: boolean
   }
 ): SetupStateShape {
   const parsed = existing ? (safeJsonParse(existing) as Partial<SetupStateShape> | null) : null
@@ -187,15 +188,23 @@ function mergeSetupState(
   // file. Slug-only declarations need this so the wizard advances when
   // only the slug is managed.
   const fileSetsWorkspace = workspace.name !== undefined || workspace.slug !== undefined
+  const forceComplete = workspace.onboardingComplete === true
+  // Stamp completedAt on the FIRST reconcile that flips the flag on,
+  // then preserve it. Re-stamping on every reconcile would churn the
+  // serialized JSON and defeat the no-op detection in
+  // reconcileFileIntoDb (every reapply would touch the DB).
+  const completedAt = forceComplete
+    ? (parsed?.completedAt ?? new Date().toISOString())
+    : parsed?.completedAt
   return {
     version: 1,
     steps: {
-      core: parsedSteps?.core ?? true,
-      workspace: fileSetsWorkspace ? true : (parsedSteps?.workspace ?? false),
-      boards: parsedSteps?.boards ?? false,
+      core: forceComplete ? true : (parsedSteps?.core ?? true),
+      workspace: forceComplete || fileSetsWorkspace ? true : (parsedSteps?.workspace ?? false),
+      boards: forceComplete ? true : (parsedSteps?.boards ?? false),
     },
     useCase: workspace.useCase ?? parsed?.useCase,
-    completedAt: parsed?.completedAt,
+    completedAt,
   }
 }
 

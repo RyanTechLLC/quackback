@@ -1,19 +1,28 @@
 import { useState, useTransition } from 'react'
-import { useRouter } from '@tanstack/react-router'
+import { useRouter, useRouteContext } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { EnvelopeIcon, KeyIcon, ShieldCheckIcon } from '@heroicons/react/24/solid'
+import { ShieldCheckIcon } from '@heroicons/react/24/solid'
 import { MethodRow } from '@/components/admin/settings/auth-shared/method-row'
 import { SettingsCard } from '@/components/admin/settings/settings-card'
 import { updateAuthConfigFn } from '@/lib/server/functions/settings'
 import { isPathManagedFromBootstrap } from '@/lib/client/config-file'
-import { useRouteContext } from '@tanstack/react-router'
 import type { AuthConfig } from '@/lib/shared/types/settings'
 
 interface TeamAuthMethodsSectionProps {
   initialConfig: AuthConfig
 }
 
+/**
+ * Team access policy card — rendered on the "Team access" tab.
+ *
+ * Previously this section also owned the team's Sign-in methods card
+ * (password + magic-link toggles). Those have moved to the "Sign-in
+ * providers" tab where they sit beside the portal toggles in a single
+ * dual-toggle row per method. This file now owns only the team-side
+ * policy controls (require 2FA, etc.) plus the SSO summary callout
+ * mounted next to it from the AuthSettings parent.
+ */
 export function TeamAuthMethodsSection({ initialConfig }: TeamAuthMethodsSectionProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -25,15 +34,8 @@ export function TeamAuthMethodsSection({ initialConfig }: TeamAuthMethodsSection
     (useRouteContext({ from: '__root__' }) as { managedFieldPaths?: string[] }) ?? {}
   const isManaged = (path: string) => isPathManagedFromBootstrap(path, managedFieldPaths)
 
-  const oauthState = (authConfig.oauth ?? {}) as Record<string, boolean | undefined>
-  const passwordEnabled = oauthState.password !== false
-  const magicLinkEnabled = oauthState.magicLink !== false
-
-  // SSO is not relevant here — these are the non-SSO team methods. The
-  // "last method" guard only considers password + magic-link (SSO as a
-  // fallback is handled separately on the /sso page).
-  const enabledMethodCount = (passwordEnabled ? 1 : 0) + (magicLinkEnabled ? 1 : 0)
-  const isLastTeamMethod = (current: boolean) => current && enabledMethodCount === 1
+  const passwordEnabled = (authConfig.oauth ?? {}).password !== false
+  const twoFactorRequired = authConfig.twoFactor?.required === true
 
   const save = async (input: Parameters<typeof updateAuthConfigFn>[0]['data']) => {
     setSaving(true)
@@ -53,23 +55,6 @@ export function TeamAuthMethodsSection({ initialConfig }: TeamAuthMethodsSection
     }
   }
 
-  const togglePassword = (checked: boolean) => {
-    setAuthConfig((prev: AuthConfig) => ({
-      ...prev,
-      oauth: { ...(prev.oauth ?? {}), password: checked },
-    }))
-    void save({ oauth: { password: checked } })
-  }
-
-  const toggleMagicLink = (checked: boolean) => {
-    setAuthConfig((prev: AuthConfig) => ({
-      ...prev,
-      oauth: { ...(prev.oauth ?? {}), magicLink: checked },
-    }))
-    void save({ oauth: { magicLink: checked } })
-  }
-
-  const twoFactorRequired = authConfig.twoFactor?.required === true
   const toggleTwoFactorRequired = (checked: boolean) => {
     setAuthConfig((prev: AuthConfig) => ({
       ...prev,
@@ -80,66 +65,22 @@ export function TeamAuthMethodsSection({ initialConfig }: TeamAuthMethodsSection
 
   return (
     <SettingsCard
-      title="Sign-in methods"
-      description="Email magic link is always on for invitations and recovery. Single sign-on is managed below."
+      title="Team security policy"
+      description="Requirements that apply on top of the sign-in methods on the Sign-in providers tab."
       contentClassName="space-y-4"
     >
-      <MethodRow
-        icon={KeyIcon}
-        label="Password"
-        description="Sign in with email and password."
-        checked={passwordEnabled}
-        onCheckedChange={togglePassword}
-        disabled={
-          saving ||
-          isPending ||
-          isManaged('auth.oauth.password') ||
-          isLastTeamMethod(passwordEnabled) ||
-          (passwordEnabled && twoFactorRequired)
-        }
-        badge={isManaged('auth.oauth.password') ? 'Managed' : undefined}
-      />
-      <MethodRow
-        icon={EnvelopeIcon}
-        label="Magic link"
-        description="Sign in with a one-click link emailed to the user. Invitations and recovery-code flows always work — this toggle only controls whether the option appears on the team sign-in form."
-        checked={magicLinkEnabled}
-        onCheckedChange={toggleMagicLink}
-        disabled={
-          saving ||
-          isPending ||
-          isManaged('auth.oauth.magicLink') ||
-          isLastTeamMethod(magicLinkEnabled)
-        }
-        badge={isManaged('auth.oauth.magicLink') ? 'Managed' : undefined}
-      />
       <MethodRow
         icon={ShieldCheckIcon}
         label="Require 2FA for team members"
         description={
           passwordEnabled
-            ? 'Admins and members must complete a TOTP challenge on every password sign-in, and magic-link sign-in is refused for users who have enrolled. Recovery codes remain available as the break-glass.'
-            : 'Enable Password sign-in first — enrolling a TOTP authenticator requires confirming a password.'
+            ? 'Members must pass a TOTP challenge to sign in. Recovery codes are the break-glass.'
+            : 'Enable Password sign-in first (on the Sign-in providers tab) — enrolling 2FA requires a password.'
         }
         checked={twoFactorRequired}
         onCheckedChange={toggleTwoFactorRequired}
         disabled={saving || isPending || isManaged('auth.twoFactor.required') || !passwordEnabled}
         badge={isManaged('auth.twoFactor.required') ? 'Managed' : undefined}
-      />
-      <MethodRow
-        icon={EnvelopeIcon}
-        label="Email me when a new device signs in"
-        description="When someone signs in from a browser or network we haven't seen before, we'll send the account owner an email. First-line defense against credential compromise."
-        checked={authConfig.security?.notifyOnNewSignIn !== false}
-        onCheckedChange={(checked) => {
-          setAuthConfig((prev: AuthConfig) => ({
-            ...prev,
-            security: { ...(prev.security ?? {}), notifyOnNewSignIn: checked },
-          }))
-          void save({ security: { notifyOnNewSignIn: checked } })
-        }}
-        disabled={saving || isPending || isManaged('auth.security.notifyOnNewSignIn')}
-        badge={isManaged('auth.security.notifyOnNewSignIn') ? 'Managed' : undefined}
       />
     </SettingsCard>
   )

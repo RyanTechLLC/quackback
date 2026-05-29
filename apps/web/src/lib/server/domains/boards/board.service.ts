@@ -26,6 +26,7 @@ import type { BoardId, PostId } from '@quackback/ids'
 import { NotFoundError, ValidationError, ConflictError } from '@/lib/shared/errors'
 import type { CreateBoardInput, UpdateBoardInput, BoardWithDetails } from './board.types'
 import { slugify } from '@/lib/shared/utils'
+import type { BoardAudience } from '@/lib/server/db'
 import { getTierLimits } from '@/lib/server/domains/settings/tier-limits.service'
 import { enforceCountLimit } from '@/lib/server/domains/settings/tier-enforce'
 
@@ -83,14 +84,18 @@ export async function createBoard(input: CreateBoardInput): Promise<Board> {
     slug = `${baseSlug}-${counter}`
   }
 
-  // Create the board
+  // Create the board. Audience defaults to public when omitted; richer
+  // choices (authenticated/team/segments) can be set here on create or
+  // changed later via updateBoardAccessFn (admin-only, audited).
+  const audience: BoardAudience = input.audience ?? { kind: 'public' }
+
   const [board] = await db
     .insert(boards)
     .values({
       name: input.name.trim(),
       slug,
       description: input.description?.trim() || null,
-      isPublic: input.isPublic ?? true, // default to public
+      audience,
       settings: input.settings || {},
     })
     .returning()
@@ -161,7 +166,6 @@ export async function updateBoard(id: BoardId, input: UpdateBoardInput): Promise
   if (input.name !== undefined) updateData.name = input.name.trim()
   if (input.description !== undefined) updateData.description = input.description?.trim() || null
   if (slug !== existingBoard.slug) updateData.slug = slug
-  if (input.isPublic !== undefined) updateData.isPublic = input.isPublic
   if (input.settings !== undefined) updateData.settings = input.settings
 
   // Update the board

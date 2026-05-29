@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 /**
  * `useDebouncedValue` — regression test for the bug that landed in the
  * audit-log filter UI: when this hook was implemented with `useMemo`

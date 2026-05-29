@@ -35,6 +35,12 @@ vi.mock('@/lib/server/functions/auth-helpers', () => ({
   getOptionalAuth: vi.fn(),
   hasAuthCredentials: vi.fn().mockReturnValue(false),
   hasSessionCookie: vi.fn().mockReturnValue(false),
+  policyActorFromAuth: vi.fn(async () => ({
+    principalId: null,
+    role: null,
+    principalType: 'anonymous' as const,
+    segmentIds: new Set(),
+  })),
 }))
 
 // --- Mock: settings service (dynamic import target for toggleVoteFn and createCommentFn) ---
@@ -45,6 +51,17 @@ vi.mock('@/lib/server/domains/settings/settings.service', () => ({
   getPortalConfig: () => mockGetPortalConfig(),
 }))
 
+// --- Mock: portal-access resolver ---
+// public-posts.ts imports `./portal-access`, which itself registers
+// `createServerFn` handlers. Without this mock those registrations would land
+// in the shared handler array and shift the hard-coded indices below. The
+// resolver defaults to `granted: true` so the guarded functions behave as on
+// a public portal.
+
+vi.mock('@/lib/server/functions/portal-access', () => ({
+  resolvePortalAccessForRequest: vi.fn(async () => ({ granted: true, reason: 'public' })),
+}))
+
 // --- Mock: dependencies for toggleVoteFn ---
 
 const mockVoteOnPost = vi.fn()
@@ -52,6 +69,13 @@ const mockCheckAnonVoteRateLimit = vi.fn().mockResolvedValue(true)
 
 vi.mock('@/lib/server/domains/posts/post.voting', () => ({
   voteOnPost: (...args: unknown[]) => mockVoteOnPost(...args),
+}))
+
+// The per-post audience gate inside toggleVoteFn dynamically imports
+// post.access (which reaches into the DB). Stub it so the existing
+// anonymous-feature-flag tests stay focused on what they assert.
+vi.mock('@/lib/server/domains/posts/post.access', () => ({
+  assertPostViewable: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('@/lib/server/utils/anon-rate-limit', () => ({
@@ -259,7 +283,12 @@ describe('createPublicPostFn anonymous feature flag', () => {
     content: 'Some content',
   }
 
-  const MOCK_BOARD = { id: 'board_123', name: 'General', slug: 'general', isPublic: true }
+  const MOCK_BOARD = {
+    id: 'board_123',
+    name: 'General',
+    slug: 'general',
+    audience: { kind: 'public' as const },
+  }
   const MOCK_STATUS = { id: 'status_123' }
   const MOCK_POST = {
     id: 'post_new',

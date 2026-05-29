@@ -442,6 +442,111 @@
       "when": 1778457600009,
       "tag": "0062_drop_sso_required_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1778457600010,
+      "tag": "0063_comment_content_json",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1778457600011,
+      "tag": "0064_post_mentions",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1778457600012,
+      "tag": "0065_principal_displayname_lower_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1778457600013,
+      "tag": "0066_granular_access_controls",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1778457600014,
+      "tag": "0067_drop_boards_moderation",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1778457600015,
+      "tag": "0068_invitation_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1778457600016,
+      "tag": "0069_widget_origin_session",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1778457600017,
+      "tag": "0070_audit_log_observability",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1778457600018,
+      "tag": "0071_widget_identified_session",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1778457600019,
+      "tag": "0072_user_locale",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1778457600020,
+      "tag": "0073_user_country",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1779062400000,
+      "tag": "0074_user_country_locale_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1779148800000,
+      "tag": "0075_invitation_account_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1779235200000,
+      "tag": "0076_user_email_lower_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1779321600000,
+      "tag": "0077_sweep_lock",
+      "breakpoints": true
     }
   ]
 }

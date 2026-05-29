@@ -1,11 +1,14 @@
 import { z } from 'zod'
 import { createServerFn } from '@tanstack/react-start'
+import { tiptapContentSchema } from '@/lib/shared/schemas/posts'
 // Import types from barrel export (client-safe)
 import {
   DEFAULT_PORTAL_CONFIG,
   type BrandingConfig,
   type UpdatePortalConfigInput,
 } from '@/lib/server/domains/settings'
+import { isAdmin } from '@/lib/shared/roles'
+import { ForbiddenError } from '@/lib/shared/errors'
 import { userIdSchema, type UserId } from '@quackback/ids'
 import {
   getPortalConfig,
@@ -51,6 +54,7 @@ export const fetchBrandingConfig = createServerFn({ method: 'GET' }).handler(asy
 export const fetchPortalConfig = createServerFn({ method: 'GET' }).handler(async () => {
   console.log(`[fn:settings] fetchPortalConfig`)
   try {
+    await requireAuth({ roles: ['admin'] })
     const config = await getPortalConfig()
     return config ?? DEFAULT_PORTAL_CONFIG
   } catch (error) {
@@ -168,7 +172,7 @@ export const fetchTeamMembersAndInvitations = createServerFn({ method: 'GET' }).
       }))
 
       const pendingInvitations = await db.query.invitation.findMany({
-        where: eq(invitation.status, 'pending'),
+        where: and(eq(invitation.status, 'pending'), eq(invitation.kind, 'team')),
         orderBy: (inv, { desc }) => [desc(inv.createdAt)],
       })
 
@@ -293,13 +297,18 @@ const updatePortalConfigSchema = z.object({
   oauth: z.record(z.string(), z.boolean().optional()).optional(),
   features: z
     .object({
-      publicView: z.boolean().optional(),
-      submissions: z.boolean().optional(),
-      comments: z.boolean().optional(),
-      voting: z.boolean().optional(),
       anonymousVoting: z.boolean().optional(),
       anonymousCommenting: z.boolean().optional(),
       anonymousPosting: z.boolean().optional(),
+    })
+    .optional(),
+  welcomeCard: z
+    .object({
+      enabled: z.boolean().optional(),
+      title: z.string().optional(),
+      // Body is re-sanitized server-side by normalizeWelcomeCardInput;
+      // tiptapContentSchema gates the shape at the boundary.
+      body: tiptapContentSchema.optional(),
     })
     .optional(),
 })
@@ -390,12 +399,6 @@ export const updateAuthConfigSchema = z.object({
   twoFactor: z
     .object({
       required: z.boolean().optional(),
-    })
-    .strict()
-    .optional(),
-  security: z
-    .object({
-      notifyOnNewSignIn: z.boolean().optional(),
     })
     .strict()
     .optional(),
@@ -744,3 +747,31 @@ export const regenerateWidgetSecretFn = createServerFn({ method: 'POST' }).handl
     throw error
   }
 })
+
+// ============================================
+// Moderation Default Operations
+// ============================================
+
+const moderationDefaultSchema = z.object({
+  requireApproval: z.enum(['none', 'anonymous', 'authenticated', 'all']),
+})
+
+export const updateModerationDefaultFn = createServerFn({ method: 'POST' })
+  .inputValidator(moderationDefaultSchema.parse)
+  .handler(async ({ data }) => {
+    console.log(`[fn:settings] updateModerationDefaultFn: requireApproval=${data.requireApproval}`)
+    const auth = await requireAuth()
+    if (!isAdmin(auth.principal.role)) {
+      throw new ForbiddenError('FORBIDDEN', 'Admin only')
+    }
+    const before = await getPortalConfig()
+    const updated = await updatePortalConfig({ moderationDefault: data })
+    await recordAuditEvent({
+      event: 'moderation.default.changed',
+      actor: actorFromAuth(auth),
+      target: { type: 'settings', id: 'portal-config' },
+      before: { moderationDefault: before.moderationDefault },
+      after: { moderationDefault: updated.moderationDefault },
+    })
+    return { moderationDefault: updated.moderationDefault }
+  })

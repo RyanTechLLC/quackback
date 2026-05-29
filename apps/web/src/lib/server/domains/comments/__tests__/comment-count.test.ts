@@ -7,7 +7,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { PostId, PrincipalId, CommentId } from '@quackback/ids'
+import type { PostId, PrincipalId, CommentId, SegmentId } from '@quackback/ids'
+import type { Actor } from '@/lib/server/policy/types'
 
 // --- Mock tracking ---
 
@@ -87,7 +88,13 @@ vi.mock('@/lib/server/db', async () => {
           boardId: 'board_mock',
           statusId: 'status_mock',
           isCommentsLocked: false,
-          board: { id: 'board_mock', slug: 'test' },
+          moderationState: 'published',
+          principalId: null,
+          board: {
+            id: 'board_mock',
+            slug: 'test',
+            audience: { kind: 'public' },
+          },
         }),
       },
       boards: {
@@ -150,6 +157,20 @@ vi.mock('@/lib/shared', () => ({
   toStatusChange: vi.fn(),
 }))
 
+const portalActor: Actor = {
+  principalId: 'principal_mock' as unknown as PrincipalId,
+  role: 'user',
+  principalType: 'user',
+  segmentIds: new Set<SegmentId>(),
+}
+
+const adminActor: Actor = {
+  principalId: 'principal_mock' as unknown as PrincipalId,
+  role: 'admin',
+  principalType: 'user',
+  segmentIds: new Set<SegmentId>(),
+}
+
 describe('Comment count maintenance', () => {
   beforeEach(() => {
     setCalls.length = 0
@@ -167,7 +188,8 @@ describe('Comment count maintenance', () => {
         {
           principalId: 'principal_mock' as PrincipalId,
           role: 'user',
-        }
+        },
+        portalActor
       )
 
       expect(transactionUsed).toBe(true)
@@ -181,7 +203,8 @@ describe('Comment count maintenance', () => {
         {
           principalId: 'principal_mock' as PrincipalId,
           role: 'user',
-        }
+        },
+        portalActor
       )
 
       // Verify that one of the set() calls includes commentCount
@@ -200,7 +223,8 @@ describe('Comment count maintenance', () => {
         {
           principalId: 'principal_mock' as PrincipalId,
           role: 'admin',
-        }
+        },
+        adminActor
       )
 
       expect(transactionUsed).toBe(true)
