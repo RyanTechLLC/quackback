@@ -244,6 +244,24 @@ vi.mock('@/lib/server/domains/changelog/changelog.service', () => ({
     createdAt: new Date('2026-01-10'),
     updatedAt: new Date('2026-01-15'),
   }),
+  listChangelogBoards: vi.fn().mockResolvedValue([
+    {
+      id: 'changelog_board_default',
+      name: 'Product Updates',
+      slug: 'product-updates',
+      description: 'New features',
+      isPublic: true,
+      position: 0,
+    },
+    {
+      id: 'changelog_board_internal',
+      name: 'Internal Notes',
+      slug: 'internal',
+      description: null,
+      isPublic: false,
+      position: 1,
+    },
+  ]),
 }))
 
 vi.mock('@/lib/server/domains/boards/board.service', () => ({
@@ -629,7 +647,8 @@ describe('MCP HTTP Handler', () => {
       expect(toolNames).toContain('unmerge_post')
       expect(toolNames).toContain('delete_post')
       expect(toolNames).toContain('restore_post')
-      expect(toolNames).toHaveLength(27)
+      expect(toolNames).toContain('list_changelog_boards')
+      expect(toolNames).toHaveLength(28)
     })
 
     it('should handle resources/list request', async () => {
@@ -1294,6 +1313,48 @@ describe('MCP HTTP Handler', () => {
       const text = JSON.parse(body.result.content[0].text)
       expect(text.id).toBe('changelog_new')
       expect(text.status).toBe('draft')
+    })
+
+    it('create_changelog falls back to the first board when boardId is omitted', async () => {
+      const { createChangelog } = await import('@/lib/server/domains/changelog/changelog.service')
+      const handleMcpRequest = await initializeSession()
+
+      const response = await handleMcpRequest(
+        mcpRequest(
+          jsonRpcRequest('tools/call', {
+            name: 'create_changelog',
+            arguments: { title: 'v1.0', content: 'New features' },
+          })
+        )
+      )
+
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as { result: { isError?: boolean } }
+      expect(body.result.isError).toBeFalsy()
+      // The fallback resolves the first board (lowest position) from the list.
+      expect(createChangelog).toHaveBeenCalledWith(
+        expect.objectContaining({ boardId: 'changelog_board_default' }),
+        expect.anything()
+      )
+    })
+
+    // ── list_changelog_boards tool ───────────────────────────────────────
+
+    it('should handle tools/call for list_changelog_boards', async () => {
+      const handleMcpRequest = await initializeSession()
+
+      const response = await handleMcpRequest(
+        mcpRequest(jsonRpcRequest('tools/call', { name: 'list_changelog_boards', arguments: {} }))
+      )
+
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as {
+        result: { content: Array<{ text: string }> }
+      }
+      const text = JSON.parse(body.result.content[0].text)
+      expect(text.boards).toHaveLength(2)
+      expect(text.boards[0]).toMatchObject({ id: 'changelog_board_default', isPublic: true })
+      expect(text.boards[1]).toMatchObject({ id: 'changelog_board_internal', isPublic: false })
     })
 
     // ── update_changelog tool ───────────────────────────────────────────

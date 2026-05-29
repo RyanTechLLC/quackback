@@ -155,6 +155,7 @@ export async function listChangelogs(params: ListChangelogParams): Promise<Chang
     const entryLinkedPosts = linkedPostsMap.get(entry.id) ?? []
     return {
       id: entry.id,
+      boardId: entry.boardId,
       title: entry.title,
       content: entry.content,
       contentJson: entry.contentJson,

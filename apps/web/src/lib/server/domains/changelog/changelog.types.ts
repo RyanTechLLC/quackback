@@ -94,6 +94,8 @@ export interface ChangelogBoardSummary {
  */
 export interface ChangelogEntryWithDetails {
   id: ChangelogId
+  /** Board this entry belongs to */
+  boardId: ChangelogBoardId
   title: string
   content: string
   contentJson: TiptapContent | null

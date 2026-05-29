@@ -61,6 +61,7 @@ import {
   updateChangelog,
   deleteChangelog,
   getChangelogById,
+  listChangelogBoards,
 } from '@/lib/server/domains/changelog/changelog.service'
 import { listChangelogs } from '@/lib/server/domains/changelog/changelog.query'
 import { publishedAtToPublishState, type PublishState } from '@/lib/shared/schemas/changelog'
@@ -300,7 +301,12 @@ const searchSchema = {
     .default('posts')
     .describe('Entity type to search. Defaults to posts.'),
   query: z.string().optional().describe('Text search across titles and content'),
-  boardId: z.string().optional().describe('Filter posts by board TypeID (ignored for changelogs)'),
+  boardId: z
+    .string()
+    .optional()
+    .describe(
+      'Filter by board TypeID. For posts: a board_… ID. For changelogs: a changelog_board_… ID (see list_changelog_boards). Ignored for articles.'
+    ),
   categoryId: z
     .string()
     .optional()
@@ -403,7 +409,12 @@ const proxyVoteSchema = {
 }
 
 const createChangelogSchema = {
-  boardId: z.string().describe('Changelog board TypeID (changelog_board_…) this entry belongs to'),
+  boardId: z
+    .string()
+    .optional()
+    .describe(
+      'Changelog board TypeID (changelog_board_…) this entry belongs to. Call list_changelog_boards to discover IDs. Defaults to the first board when omitted.'
+    ),
   title: z.string().max(200).describe('Changelog entry title'),
   content: z
     .string()
@@ -661,7 +672,7 @@ type ProxyVoteArgs = {
 }
 
 type CreateChangelogArgs = {
-  boardId: string
+  boardId?: string
   title: string
   content: string
   publish: boolean
@@ -1162,6 +1173,37 @@ Examples:
     }
   )
 
+  // list_changelog_boards
+  server.tool(
+    'list_changelog_boards',
+    `List changelog boards. Use this to discover board TypeIDs (changelog_board_…) before creating an entry on a specific board or filtering search({ entity: "changelogs", boardId }). Private boards (isPublic: false) are team-only and never appear in the public changelog.
+
+Examples:
+- list_changelog_boards()`,
+    {},
+    READ_ONLY,
+    async (): Promise<CallToolResult> => {
+      const denied = requireScope(auth, 'read:feedback')
+      if (denied) return denied
+      const roleDenied = requireTeamRole(auth)
+      if (roleDenied) return roleDenied
+      try {
+        const boards = await listChangelogBoards()
+        return compactJsonResult({
+          boards: boards.map((b) => ({
+            id: b.id,
+            name: b.name,
+            slug: b.slug,
+            description: b.description,
+            isPublic: b.isPublic,
+          })),
+        })
+      } catch (err) {
+        return errorResult(err)
+      }
+    }
+  )
+
   // create_changelog
   server.tool(
     'create_changelog',
@@ -1182,9 +1224,25 @@ Examples:
         const publishState = args.publishedAt
           ? publishedAtToPublishState(args.publishedAt)
           : ({ type: args.publish ? 'published' : 'draft' } as const)
+
+        // Resolve the target board. When the caller omits boardId, fall back
+        // to the first (lowest-position) board so existing agents keep working.
+        let boardId = args.boardId as ChangelogBoardId | undefined
+        if (!boardId) {
+          const boards = await listChangelogBoards()
+          if (boards.length === 0) {
+            return errorResult(
+              new Error(
+                'No changelog board exists. Create one first (list_changelog_boards) or run migrations.'
+              )
+            )
+          }
+          boardId = boards[0].id
+        }
+
         const result = await createChangelog(
           {
-            boardId: args.boardId as ChangelogBoardId,
+            boardId,
             title: args.title,
             content: args.content,
             publishState,
@@ -1194,6 +1252,7 @@ Examples:
 
         return jsonResult({
           id: result.id,
+          boardId: result.boardId,
           title: result.title,
           status: result.status,
           publishedAt: result.publishedAt,
@@ -2020,6 +2079,7 @@ async function searchChangelogs(args: SearchArgs): Promise<CallToolResult> {
 
   const result = await listChangelogs({
     status,
+    boardId: args.boardId as ChangelogBoardId | undefined,
     cursor: cursorValue,
     limit: args.limit,
   })
@@ -2032,6 +2092,7 @@ async function searchChangelogs(args: SearchArgs): Promise<CallToolResult> {
   return compactJsonResult({
     changelogs: result.items.map((c) => ({
       id: c.id,
+      boardId: c.boardId,
       title: c.title,
       excerpt: c.content ? truncate(c.content, 200) : '',
       status: c.status,

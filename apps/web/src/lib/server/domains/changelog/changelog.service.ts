@@ -484,6 +484,7 @@ export async function getChangelogById(id: ChangelogId): Promise<ChangelogEntryW
 
   return {
     id: entry.id,
+    boardId: entry.boardId,
     title: entry.title,
     content: entry.content,
     contentJson: entry.contentJson,
