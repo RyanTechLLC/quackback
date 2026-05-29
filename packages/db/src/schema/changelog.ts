@@ -1,14 +1,52 @@
-import { pgTable, text, timestamp, integer, index, uniqueIndex, jsonb } from 'drizzle-orm/pg-core'
+import {
+  pgTable,
+  text,
+  timestamp,
+  integer,
+  boolean,
+  index,
+  uniqueIndex,
+  jsonb,
+} from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { typeIdWithDefault, typeIdColumn, typeIdColumnNullable } from '@quackback/ids/drizzle'
 import { principal } from './auth'
 import { posts } from './posts'
 import type { TiptapContent } from '../types'
 
+// A changelog board groups changelog entries. Multiple boards are supported,
+// and each board can be public or locked to team/staff only (isPublic = false).
+export const changelogBoards = pgTable(
+  'changelog_boards',
+  {
+    id: typeIdWithDefault('changelog_board')('id').primaryKey(),
+    slug: text('slug').notNull().unique(),
+    name: text('name').notNull(),
+    description: text('description'),
+    // When false, the board and its entries are only visible to team/staff
+    // (workspace members with role admin/member), never to the public.
+    isPublic: boolean('is_public').default(true).notNull(),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    // Soft delete support
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('changelog_boards_position_idx').on(table.position),
+    index('changelog_boards_is_public_idx').on(table.isPublic),
+    index('changelog_boards_deleted_at_idx').on(table.deletedAt),
+  ]
+)
+
 export const changelogEntries = pgTable(
   'changelog_entries',
   {
     id: typeIdWithDefault('changelog')('id').primaryKey(),
+    // Board this entry belongs to. Drives public/private visibility.
+    boardId: typeIdColumn('changelog_board')('board_id')
+      .notNull()
+      .references(() => changelogBoards.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
     content: text('content').notNull(),
     // Rich content stored as TipTap JSON (optional, for rich text support)
@@ -26,6 +64,7 @@ export const changelogEntries = pgTable(
     viewCount: integer('view_count').default(0).notNull(),
   },
   (table) => [
+    index('changelog_board_id_idx').on(table.boardId),
     index('changelog_published_at_idx').on(table.publishedAt),
     index('changelog_principal_id_idx').on(table.principalId),
     index('changelog_deleted_at_idx').on(table.deletedAt),
@@ -51,7 +90,15 @@ export const changelogEntryPosts = pgTable(
   ]
 )
 
+export const changelogBoardsRelations = relations(changelogBoards, ({ many }) => ({
+  entries: many(changelogEntries),
+}))
+
 export const changelogEntriesRelations = relations(changelogEntries, ({ one, many }) => ({
+  board: one(changelogBoards, {
+    fields: [changelogEntries.boardId],
+    references: [changelogBoards.id],
+  }),
   author: one(principal, {
     fields: [changelogEntries.principalId],
     references: [principal.id],

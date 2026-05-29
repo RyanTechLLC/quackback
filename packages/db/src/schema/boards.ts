@@ -62,11 +62,9 @@ export const tags = pgTable(
 
 // Relations - defined after posts import to avoid circular dependency
 import { posts, postRoadmaps } from './posts'
-import { changelogEntries } from './changelog'
 
 export const boardsRelations = relations(boards, ({ many }) => ({
   posts: many(posts),
-  changelogEntries: many(changelogEntries),
 }))
 
 export const roadmapsRelations = relations(roadmaps, ({ many }) => ({

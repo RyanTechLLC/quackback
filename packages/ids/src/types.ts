@@ -49,6 +49,9 @@ export type RoadmapId = TypeId<'roadmap'>
 /** Changelog entry ID - e.g., changelog_01h455vb4pex5vsknk084sn02q */
 export type ChangelogId = TypeId<'changelog'>
 
+/** Changelog board ID - e.g., changelog_board_01h455vb4pex5vsknk084sn02q */
+export type ChangelogBoardId = TypeId<'changelog_board'>
+
 /** Integration ID - e.g., integration_01h455vb4pex5vsknk084sn02q */
 export type IntegrationId = TypeId<'integration'>
 
@@ -239,6 +242,7 @@ export interface EntityIdMap {
   merge_suggestion: MergeSuggestionId
   roadmap: RoadmapId
   changelog: ChangelogId
+  changelog_board: ChangelogBoardId
   integration: IntegrationId
   platform_cred: PlatformCredentialId
   event_mapping: EventMappingId

@@ -21,13 +21,14 @@ import type {
   UserId,
   WorkspaceId,
   ChangelogId,
+  ChangelogBoardId,
   RawFeedbackItemId,
 } from '@quackback/ids'
 import { user, account, settings, principal } from './schema/auth'
 import { boards, tags, roadmaps } from './schema/boards'
 import { posts, postTags, postRoadmaps, votes, comments } from './schema/posts'
 import { postStatuses, DEFAULT_STATUSES } from './schema/statuses'
-import { changelogEntries, changelogEntryPosts } from './schema/changelog'
+import { changelogBoards, changelogEntries, changelogEntryPosts } from './schema/changelog'
 import { segments } from './schema/segments'
 import type { SegmentRules } from './schema/segments'
 import { feedbackSources, rawFeedbackItems, feedbackSignals } from './schema/feedback'
@@ -207,6 +208,23 @@ const commentContents = [
   'Thanks for considering this!',
 ]
 
+const changelogBoardPresets = [
+  {
+    name: 'Product Updates',
+    slug: 'product-updates',
+    description: 'New features, improvements, and fixes',
+    isPublic: true,
+    position: 0,
+  },
+  {
+    name: 'Internal Notes',
+    slug: 'internal',
+    description: 'Team-only release notes, not visible to the public',
+    isPublic: false,
+    position: 1,
+  },
+]
+
 const changelogPresets = [
   {
     title: 'Introducing Dark Mode',
@@ -214,6 +232,7 @@ const changelogPresets = [
       'We heard your feedback loud and clear! Dark mode is finally here. Toggle it from Settings > Appearance or let your system preference decide. This update also includes improved contrast ratios for better accessibility.',
     status: 'published' as const,
     daysAgo: 3,
+    board: 'product-updates',
   },
   {
     title: 'Slack Integration Now Available',
@@ -221,6 +240,7 @@ const changelogPresets = [
       'Connect your workspace to Slack and get real-time notifications for new feedback, votes, and status changes. Set up custom channels for different boards and never miss important updates from your users.',
     status: 'published' as const,
     daysAgo: 14,
+    board: 'product-updates',
   },
   {
     title: 'Export Your Data to CSV',
@@ -228,6 +248,7 @@ const changelogPresets = [
       'You can now export your posts, votes, and comments to CSV format. Perfect for reporting, analysis, or backing up your data. Find the export option in Settings > Data.',
     status: 'published' as const,
     daysAgo: 30,
+    board: 'product-updates',
   },
   {
     title: 'Coming Soon: Mobile App',
@@ -235,12 +256,14 @@ const changelogPresets = [
       'We are excited to announce that our mobile app is in development! Stay tuned for iOS and Android apps that let you manage feedback on the go. Beta testing will begin next month.',
     status: 'scheduled' as const,
     daysAhead: 7,
+    board: 'product-updates',
   },
   {
     title: 'Improved Search & Filtering',
     content:
       'Finding feedback just got easier. Our new search now supports fuzzy matching, filters by status/board/tag, and remembers your recent searches. Plus, saved views are coming soon!',
     status: 'draft' as const,
+    board: 'internal',
   },
   {
     title: 'Q1 2025 Roadmap Update',
@@ -248,6 +271,7 @@ const changelogPresets = [
       'Here is what we shipped this quarter and what is coming next. Thank you to everyone who submitted feedback - your input directly shapes our product direction.',
     status: 'published' as const,
     daysAgo: 45,
+    board: 'internal',
   },
 ]
 
@@ -591,6 +615,35 @@ async function seed() {
     }
     console.log(`Created ${commentInserts.length} comments`)
 
+    // Create changelog boards (idempotent per slug - the migration already
+    // creates a default 'product-updates' board, so reuse any that exist).
+    console.log('Creating changelog boards...')
+    const changelogBoardIdsBySlug = new Map<string, ChangelogBoardId>()
+    const existingChangelogBoards = await db.select().from(changelogBoards)
+    existingChangelogBoards.forEach((b) => changelogBoardIdsBySlug.set(b.slug, b.id))
+    let createdChangelogBoards = 0
+    for (const preset of changelogBoardPresets) {
+      if (changelogBoardIdsBySlug.has(preset.slug)) continue
+      const boardId: ChangelogBoardId = generateId('changelog_board')
+      await db.insert(changelogBoards).values({
+        id: boardId,
+        name: preset.name,
+        slug: preset.slug,
+        description: preset.description,
+        isPublic: preset.isPublic,
+        position: preset.position,
+      })
+      changelogBoardIdsBySlug.set(preset.slug, boardId)
+      createdChangelogBoards++
+    }
+    console.log(
+      `Created ${createdChangelogBoards} changelog boards (${changelogBoardIdsBySlug.size} total)`
+    )
+    // Fallback board for entries whose preset slug has no matching board
+    const defaultChangelogBoardId =
+      changelogBoardIdsBySlug.get('product-updates') ??
+      changelogBoardIdsBySlug.values().next().value!
+
     // Create changelog entries
     console.log('Creating changelog entries...')
 
@@ -618,6 +671,7 @@ async function seed() {
 
       changelogInserts.push({
         id: changelogId,
+        boardId: changelogBoardIdsBySlug.get(preset.board) ?? defaultChangelogBoardId,
         title: preset.title,
         content: preset.content,
         contentJson: textToTipTapJson(preset.content),

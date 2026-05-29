@@ -3,7 +3,7 @@
  */
 
 import type { TiptapContent } from '@/lib/server/db'
-import type { ChangelogId, PrincipalId, PostId } from '@quackback/ids'
+import type { ChangelogId, ChangelogBoardId, PrincipalId, PostId } from '@quackback/ids'
 import type { PublishState } from '@/lib/shared/schemas/changelog'
 
 export type { PublishState } from '@/lib/shared/schemas/changelog'
@@ -23,6 +23,8 @@ export interface CreateChangelogInput {
   linkedPostIds?: PostId[]
   /** Publish state */
   publishState: PublishState
+  /** Board this entry belongs to. Defaults to the default board when omitted. */
+  boardId?: ChangelogBoardId
 }
 
 /**

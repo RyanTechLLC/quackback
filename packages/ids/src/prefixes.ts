@@ -26,6 +26,7 @@ export const ID_PREFIXES = {
   // Planning domain
   roadmap: 'roadmap',
   changelog: 'changelog',
+  changelog_board: 'changelog_board',
 
   // Help center
   category: 'category',
