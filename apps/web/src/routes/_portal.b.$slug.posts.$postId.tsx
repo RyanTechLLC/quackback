@@ -104,7 +104,7 @@ export const Route = createFileRoute('/_portal/b/$slug/posts/$postId')({
 
 function PostDetailPage() {
   const { postId, slug } = Route.useLoaderData()
-  const { session, settings } = useRouteContext({ from: '__root__' })
+  const { session } = useRouteContext({ from: '__root__' })
 
   const intl = useIntl()
   const [isEditingPost, setIsEditingPost] = useState(false)
@@ -120,9 +120,8 @@ function PostDetailPage() {
     canDelete: false,
   }
 
-  const richMediaEnabled = settings?.publicPortalConfig?.features?.richMediaInPosts ?? true
   const isAnonymousSession = session?.user?.principalType === 'anonymous'
-  const canUploadImages = canEdit && !isAnonymousSession && !!session?.user && richMediaEnabled
+  const canUploadImages = canEdit && !isAnonymousSession && !!session?.user
   const { upload: uploadImage } = usePortalImageUpload()
 
   const {

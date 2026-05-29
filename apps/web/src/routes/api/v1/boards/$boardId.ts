@@ -10,12 +10,14 @@ import {
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import type { BoardId } from '@quackback/ids'
 
-// Input validation schema
+// Input validation schema — audience is intentionally excluded.
+// Visibility (board.audience) is a policy-level setting changed only via
+// updateBoardAccessFn (admin-only, audited). Accepting it here would let a
+// member-role API key silently flip board visibility without an audit event.
 const updateBoardSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   slug: z.string().min(1).max(100).optional(),
   description: z.string().max(500).nullable().optional(),
-  isPublic: z.boolean().optional(),
 })
 
 export const Route = createFileRoute('/api/v1/boards/$boardId')({
@@ -40,7 +42,7 @@ export const Route = createFileRoute('/api/v1/boards/$boardId')({
             name: board.name,
             slug: board.slug,
             description: board.description,
-            isPublic: board.isPublic,
+            audience: board.audience,
             settings: board.settings,
             createdAt: board.createdAt.toISOString(),
             updatedAt: board.updatedAt.toISOString(),
@@ -75,7 +77,6 @@ export const Route = createFileRoute('/api/v1/boards/$boardId')({
             name: parsed.data.name,
             slug: parsed.data.slug,
             description: parsed.data.description,
-            isPublic: parsed.data.isPublic,
           })
 
           return successResponse({
@@ -83,7 +84,7 @@ export const Route = createFileRoute('/api/v1/boards/$boardId')({
             name: board.name,
             slug: board.slug,
             description: board.description,
-            isPublic: board.isPublic,
+            audience: board.audience,
             settings: board.settings,
             createdAt: board.createdAt.toISOString(),
             updatedAt: board.updatedAt.toISOString(),

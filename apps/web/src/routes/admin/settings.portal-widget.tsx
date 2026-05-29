@@ -24,6 +24,7 @@ import {
   BrandingPreviewPanel,
 } from '@/components/admin/settings/branding/branding-layout'
 import { WidgetPreview } from '@/components/admin/settings/widget/widget-preview'
+import { InlineSpinner } from '@/components/admin/settings/inline-spinner'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
@@ -56,11 +57,6 @@ export const Route = createFileRoute('/admin/settings/portal-widget')({
   },
   component: PortalWidgetSettingsPage,
 })
-
-function InlineSpinner({ visible }: { visible: boolean }) {
-  if (!visible) return null
-  return <ArrowPathIcon className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-}
 
 function PortalWidgetSettingsPage() {
   const widgetConfigQuery = useSuspenseQuery(settingsQueries.widgetConfig())
@@ -787,6 +783,13 @@ function WidgetInstallation({
                   />
                 </div>
               </div>
+
+              {!verifiedIdentityOnly && (
+                <p className="text-[11px] text-muted-foreground bg-muted/40 border border-border/50 rounded px-2 py-1.5 leading-relaxed">
+                  Without verification, anyone with a customer&apos;s email can post as them. Team
+                  accounts are always protected.
+                </p>
+              )}
 
               {verifiedIdentityOnly && (
                 <div className="space-y-2.5">

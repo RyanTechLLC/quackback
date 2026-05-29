@@ -3,7 +3,7 @@
  * Queries database to determine all targets for an event.
  */
 
-import type { PostId, PrincipalId, UserId, WebhookId } from '@quackback/ids'
+import type { PostId, PrincipalId, SegmentId, UserId, WebhookId } from '@quackback/ids'
 import {
   db,
   integrations,
@@ -13,8 +13,13 @@ import {
   inArray,
   isNull,
   principal,
+  user,
   webhooks,
+  posts,
+  boards,
+  userSegments,
 } from '@/lib/server/db'
+import { canViewPost, type Actor } from '@/lib/server/policy'
 import { decryptSecrets } from '@/lib/server/integrations/encryption'
 import { decryptWebhookSecret } from '@/lib/server/domains/webhooks/encryption'
 import {
@@ -30,6 +35,91 @@ import { stripHtml, truncate } from './hook-utils'
 import { buildHookContext, type HookContext } from './hook-context'
 import type { EventData, EventActor, PostMergedPayload, PostUnmergedPayload } from './types'
 import { getOpenAI } from '@/lib/server/domains/ai/config'
+
+/**
+ * Drop subscribers who can't view the post under its current board
+ * audience + moderation state. Used by every notification fan-out path
+ * (subscriber + @-mention) so an audience flip after the subscription
+ * was created doesn't keep leaking content via email/in-app.
+ *
+ * Fast path: when the post is on a public-audience board AND published,
+ * every authenticated subscriber passes — skip the per-principal
+ * actor/segment lookup entirely. This is the common case for most
+ * workspaces; only the audience-restricted minority pays the per-row
+ * cost.
+ */
+async function filterSubscribersByPostAudience(
+  postId: PostId,
+  subscribers: Subscriber[]
+): Promise<Subscriber[]> {
+  if (subscribers.length === 0) return subscribers
+
+  const postRows = await db
+    .select({
+      moderationState: posts.moderationState,
+      principalId: posts.principalId,
+      audience: boards.audience,
+    })
+    .from(posts)
+    .innerJoin(boards, eq(posts.boardId, boards.id))
+    .where(and(eq(posts.id, postId), isNull(posts.deletedAt), isNull(boards.deletedAt)))
+    .limit(1)
+
+  const post = postRows[0]
+  if (!post) {
+    // Post was deleted or its board was deleted — drop everyone (no
+    // delivery for a target that no longer exists).
+    return []
+  }
+
+  // Fast path: public board + published post — everyone is in.
+  if (post.audience?.kind === 'public' && post.moderationState === 'published') {
+    return subscribers
+  }
+
+  // Batch-load each subscriber's role + segments in one query.
+  const principalIds = subscribers.map((s) => s.principalId)
+  const principals = await db
+    .select({
+      id: principal.id,
+      role: principal.role,
+      type: principal.type,
+    })
+    .from(principal)
+    .where(inArray(principal.id, principalIds))
+  const principalMap = new Map(principals.map((p) => [String(p.id), p]))
+
+  const segmentRows = await db
+    .select({
+      principalId: userSegments.principalId,
+      segmentId: userSegments.segmentId,
+    })
+    .from(userSegments)
+    .where(inArray(userSegments.principalId, principalIds))
+  const segmentsByPrincipal = new Map<string, Set<SegmentId>>()
+  for (const row of segmentRows) {
+    const key = String(row.principalId)
+    const set = segmentsByPrincipal.get(key) ?? new Set<SegmentId>()
+    set.add(row.segmentId as SegmentId)
+    segmentsByPrincipal.set(key, set)
+  }
+
+  return subscribers.filter((sub) => {
+    const principalRow = principalMap.get(String(sub.principalId))
+    if (!principalRow) return false
+    const actor: Actor = {
+      principalId: principalRow.id,
+      role: (principalRow.role ?? null) as Actor['role'],
+      principalType: principalRow.type as Actor['principalType'],
+      segmentIds: segmentsByPrincipal.get(String(sub.principalId)) ?? new Set(),
+    }
+    return canViewPost(
+      actor,
+      { moderationState: post.moderationState, principalId: post.principalId },
+      { audience: post.audience }
+    ).allowed
+  })
+}
 
 /**
  * Map system event types to notification event types
@@ -54,6 +144,8 @@ const SUBSCRIBER_EVENT_TYPES = [
   'comment.created',
   'changelog.published',
 ] as const
+/** Events that resolve a single mentioned principal as the notification target */
+const MENTION_EVENT_TYPES = ['post.mentioned'] as const
 const AI_EVENT_TYPES = ['post.created'] as const
 const SUMMARY_EVENT_TYPES = ['post.created', 'comment.created'] as const
 /**
@@ -84,6 +176,12 @@ export async function getHookTargets(event: EventData): Promise<HookTarget[]> {
         const subscriberTargets = await getSubscriberTargets(event, context)
         targets.push(...subscriberTargets)
       }
+    }
+
+    // Direct-mention targets (single principal whose id is in the payload)
+    if (MENTION_EVENT_TYPES.includes(event.type as (typeof MENTION_EVENT_TYPES)[number])) {
+      const mentionTargets = await getMentionTargets(event, context)
+      targets.push(...mentionTargets)
     }
 
     // AI targets (sentiment, embeddings) - only when AI is configured
@@ -251,6 +349,16 @@ async function getSubscriberTargets(event: EventData, context: HookContext): Pro
   let nonActorSubscribers = subscribers.filter(
     (subscriber) => !isActorSubscriber(subscriber, event.actor)
   )
+  if (nonActorSubscribers.length === 0) return []
+
+  // Audience filter: drop subscribers who no longer have view access to
+  // the post (board audience changed, post was moderated, etc.). Without
+  // this, a user who subscribed while the board was public keeps
+  // receiving comment / status notifications — including post title and
+  // comment preview in the email body — after the board flips to
+  // team-only or segments. The in-app list-view redaction (round 2) only
+  // catches reads; the email itself is the leak.
+  nonActorSubscribers = await filterSubscribersByPostAudience(postId, nonActorSubscribers)
   if (nonActorSubscribers.length === 0) return []
 
   // For private comments, only notify team member subscribers
@@ -497,6 +605,119 @@ async function buildNotificationConfig(
   }
 
   return null
+}
+
+// ============================================================================
+// Mention Targets
+// ============================================================================
+
+/** Principal roles that are eligible to receive mention notifications */
+const MENTION_ELIGIBLE_ROLES = new Set(['admin', 'member', 'user'])
+
+/**
+ * Resolve hook targets for a `post.mentioned` event.
+ *
+ * The event payload carries a single `mentionedPrincipalId`. We look up that
+ * principal (left-joined to user for email), apply defensive type/role
+ * filtering so anonymous and service principals never get notified, and
+ * return:
+ *  - one notification target (always, when the principal exists and is eligible)
+ *  - one email target (only when the joined user has a non-null email)
+ */
+async function getMentionTargets(event: EventData, context: HookContext): Promise<HookTarget[]> {
+  if (event.type !== 'post.mentioned') return []
+
+  const { mentionedPrincipalId, postTitle, postUrl } = event.data
+  if (!mentionedPrincipalId) return []
+
+  const rows = await db
+    .select({
+      id: principal.id,
+      type: principal.type,
+      role: principal.role,
+      email: user.email,
+    })
+    .from(principal)
+    .leftJoin(user, eq(principal.userId, user.id))
+    .where(eq(principal.id, mentionedPrincipalId as PrincipalId))
+    .limit(1)
+
+  const row = rows[0]
+  if (!row) return []
+
+  // Defensive: only human-user principals with an eligible role get mention notifications.
+  // Anonymous principals don't have a stable inbox to deliver to; service principals
+  // are integrations/API keys, not humans. The role check is belt-and-suspenders for
+  // the same reason.
+  if (row.type !== 'user' || !MENTION_ELIGIBLE_ROLES.has(row.role)) return []
+
+  // Audience filter: the mentioned principal must be able to see the
+  // post under its board's current audience. Without this, an admin can
+  // @-mention a portal user from a team-only post and that user gets
+  // an email with the team-only post title in the subject.
+  const postIdForCheck = event.data.postId as PostId
+  const allowedIds = await filterSubscribersByPostAudience(postIdForCheck, [
+    {
+      principalId: row.id as PrincipalId,
+      // The remaining fields don't matter for the audience check —
+      // canViewPost only reads role + principalType + segmentIds.
+      userId: '',
+      email: row.email ?? '',
+      name: null,
+      reason: 'manual',
+      notifyComments: false,
+      notifyStatusChanges: false,
+    },
+  ])
+  if (allowedIds.length === 0) return []
+
+  const targets: HookTarget[] = []
+
+  targets.push({
+    type: 'notification',
+    target: { principalIds: [row.id as PrincipalId] },
+    config: {
+      postId: event.data.postId,
+      postTitle,
+      postUrl,
+      eventType: 'post.mentioned',
+    },
+  })
+
+  if (row.email) {
+    // Honour the global emailMuted preference. Without this, a user who hit
+    // unsubscribe-all (which sets emailMuted=true) would still get direct
+    // mention emails because the mention path doesn't go through the
+    // subscriber filter that runs shouldSendEmail.
+    const prefsMap = await batchGetNotificationPreferences([row.id as PrincipalId])
+    const prefs = prefsMap.get(row.id as PrincipalId)
+    if (!prefs?.emailMuted) {
+      const tokenMap = await batchGenerateUnsubscribeTokens([
+        {
+          principalId: row.id as PrincipalId,
+          postId: event.data.postId as PostId,
+          action: 'unsubscribe_all',
+        },
+      ])
+      const token = tokenMap.get(row.id as PrincipalId)
+      targets.push({
+        type: 'email',
+        target: {
+          email: row.email,
+          unsubscribeUrl: token ? `${context.portalBaseUrl}/unsubscribe?token=${token}` : undefined,
+        },
+        config: {
+          postTitle,
+          postUrl,
+          workspaceName: context.workspaceName,
+          logoUrl: context.logoUrl ?? undefined,
+          eventType: 'post.mentioned',
+        },
+      })
+    }
+  }
+
+  return targets
 }
 
 // ============================================================================

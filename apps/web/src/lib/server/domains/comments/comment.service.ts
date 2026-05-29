@@ -20,7 +20,31 @@ import {
   dispatchPostStatusChanged,
   buildEventActor,
 } from '@/lib/server/events/dispatch'
+import { commentMarkdownToTiptapJson } from '@/lib/server/markdown-tiptap'
+import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
+import type { TiptapContent } from '@/lib/shared/db-types'
 import type { CreateCommentInput, CreateCommentResult, UpdateCommentInput } from './comment.types'
+import { canCreateComment } from '@/lib/server/policy/posts'
+import type { Actor } from '@/lib/server/policy/types'
+
+/**
+ * Resolve the TipTap doc to store. UI clients send `contentJson` directly
+ * (the editor produces it natively); REST/API callers post only markdown,
+ * so we parse + sanitise on their behalf. Markdown stays the API source of
+ * truth; the JSON column is a render-time cache.
+ *
+ * Provided JSON is sanitised before storage: the read path prefers
+ * contentJson, so a caller who supplied innocuous `content` and a wholly
+ * different JSON shape would otherwise be able to render arbitrary nodes
+ * regardless of the 5,000-char content cap.
+ */
+function resolveContentJson(
+  content: string,
+  provided: TiptapContent | null | undefined
+): TiptapContent {
+  if (provided) return sanitizeTiptapContent(provided)
+  return commentMarkdownToTiptapJson(content)
+}
 
 export async function createComment(
   input: CreateCommentInput,
@@ -32,6 +56,7 @@ export async function createComment(
     displayName?: string
     role: 'admin' | 'member' | 'user'
   },
+  actor: Actor,
   options?: { skipDispatch?: boolean }
 ): Promise<CreateCommentResult> {
   console.log(
@@ -47,9 +72,18 @@ export async function createComment(
   }
   const board = post.board
 
-  // Check if comments are locked (portal users blocked, team members bypass)
-  if (post.isCommentsLocked && author.role === 'user') {
-    throw new ForbiddenError('COMMENTS_LOCKED', 'Comments are locked on this post')
+  // Enforce access-control policy: board audience + post visibility + comments-locked.
+  const decision = canCreateComment(
+    actor,
+    {
+      moderationState: post.moderationState,
+      principalId: post.principalId,
+      isCommentsLocked: post.isCommentsLocked,
+    },
+    { audience: board.audience }
+  )
+  if (!decision.allowed) {
+    throw new ForbiddenError('FORBIDDEN', decision.reason)
   }
 
   // Validate parent comment exists if specified
@@ -100,6 +134,9 @@ export async function createComment(
   // Only for team members, root-level comments, with a valid statusId
   const shouldChangeStatus = !!(input.statusId && authorIsTeamMember && !input.parentId)
 
+  const trimmedContent = input.content.trim()
+  const contentJson = resolveContentJson(trimmedContent, input.contentJson)
+
   let comment: Comment
   let previousStatusName: string | null = null
   let newStatusName: string | null = null
@@ -126,7 +163,8 @@ export async function createComment(
         .insert(comments)
         .values({
           postId: input.postId,
-          content: input.content.trim(),
+          content: trimmedContent,
+          contentJson,
           parentId: input.parentId || null,
           principalId: author.principalId,
           isTeamMember: authorIsTeamMember,
@@ -157,7 +195,8 @@ export async function createComment(
         .insert(comments)
         .values({
           postId: input.postId,
-          content: input.content.trim(),
+          content: trimmedContent,
+          contentJson,
           parentId: input.parentId || null,
           principalId: author.principalId,
           isTeamMember: authorIsTeamMember,
@@ -265,7 +304,13 @@ export async function updateComment(
 
   // Build update data
   const updateData: Partial<Comment> = {}
-  if (input.content !== undefined) updateData.content = input.content.trim()
+  if (input.content !== undefined) {
+    const trimmed = input.content.trim()
+    updateData.content = trimmed
+    updateData.contentJson = resolveContentJson(trimmed, input.contentJson)
+  } else if (input.contentJson !== undefined) {
+    updateData.contentJson = input.contentJson
+  }
 
   // Update the comment
   const [updatedComment] = await db

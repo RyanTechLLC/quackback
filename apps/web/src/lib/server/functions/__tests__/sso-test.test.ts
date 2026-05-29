@@ -149,7 +149,10 @@ describe('startSsoTestFn', () => {
     expect(result.authorizeUrl).toMatch(
       /redirect_uri=https%3A%2F%2Fqb\.test%2Fapi%2Fauth%2Foauth2%2Fcallback%2Fsso/
     )
-    expect(result.authorizeUrl).not.toMatch(/code_challenge/)
+    // PKCE is sent on the test handshake to match production (better-auth's
+    // genericOAuth defaults pkce:true) and to satisfy IdPs that require it.
+    expect(result.authorizeUrl).toMatch(/code_challenge=/)
+    expect(result.authorizeUrl).toMatch(/code_challenge_method=S256/)
     expect(hoisted.cacheSet).toHaveBeenCalledTimes(1)
   })
 })

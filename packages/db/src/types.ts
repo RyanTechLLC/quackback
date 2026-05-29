@@ -18,8 +18,16 @@ import type { principal } from './schema/auth'
 export const STATUS_CATEGORIES = ['active', 'complete', 'closed'] as const
 export type StatusCategory = (typeof STATUS_CATEGORIES)[number]
 
-// Moderation states for posts (e.g., for imported content filtering)
-export const MODERATION_STATES = ['published', 'pending', 'spam', 'archived'] as const
+// Moderation states for posts — single source of truth, kept in sync with
+// the posts.moderation_state column enum (schema.test.ts pins the match).
+export const MODERATION_STATES = [
+  'published',
+  'pending',
+  'spam',
+  'archived',
+  'closed',
+  'deleted',
+] as const
 export type ModerationState = (typeof MODERATION_STATES)[number]
 
 // Board types
@@ -30,6 +38,16 @@ export type NewBoard = InferInsertModel<typeof boards>
 export interface BoardSettings {
   roadmapStatusIds?: StatusId[] // Status IDs to show on roadmap
 }
+
+// Stored in boards.audience jsonb. Team members retain access at every kind
+// — kind='team' is the *non-team excluded* tier, not a team-only allowlist.
+export type BoardAudience =
+  | { kind: 'public' }
+  | { kind: 'authenticated' }
+  | { kind: 'team' }
+  | { kind: 'segments'; segmentIds: string[] }
+
+export const DEFAULT_BOARD_AUDIENCE: BoardAudience = { kind: 'public' }
 
 // Integration config (stored in integrations.config JSONB column)
 // Each integration defines its own typed config at the integration layer.

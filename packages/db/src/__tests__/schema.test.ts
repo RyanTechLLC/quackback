@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { getTableName, getTableColumns } from 'drizzle-orm'
 import { posts, votes, comments, postTags, postRoadmaps, commentReactions } from '../schema/posts'
-import { REACTION_EMOJIS } from '../types'
+import { REACTION_EMOJIS, MODERATION_STATES } from '../types'
 import { boards, roadmaps, tags } from '../schema/boards'
 import { integrations } from '../schema/integrations'
 import { changelogEntries } from '../schema/changelog'
@@ -19,7 +19,7 @@ describe('Schema definitions', () => {
       expect(columns).toContain('slug')
       expect(columns).toContain('name')
       expect(columns).toContain('description')
-      expect(columns).toContain('isPublic')
+      expect(columns).toContain('audience')
       expect(columns).toContain('settings')
       expect(columns).toContain('createdAt')
       expect(columns).toContain('updatedAt')
@@ -29,6 +29,13 @@ describe('Schema definitions', () => {
     it('has correct column count', () => {
       const columns = Object.keys(getTableColumns(boards))
       expect(columns.length).toBe(9)
+    })
+
+    it('no longer has the legacy isPublic column', () => {
+      // Regression guard for the unified migration that dropped is_public
+      // in favour of `audience`. New code reads audience exclusively.
+      const columns = Object.keys(getTableColumns(boards))
+      expect(columns).not.toContain('isPublic')
     })
   })
 
@@ -85,6 +92,12 @@ describe('Schema definitions', () => {
     it('has correct column count', () => {
       const columns = Object.keys(getTableColumns(posts))
       expect(columns.length).toBe(30)
+    })
+
+    it('MODERATION_STATES matches the posts.moderation_state column enum', () => {
+      // Single source of truth: the shared constant must equal exactly the
+      // values the Postgres column accepts. Sorted compare — order is irrelevant.
+      expect([...MODERATION_STATES].sort()).toEqual([...posts.moderationState.enumValues].sort())
     })
   })
 

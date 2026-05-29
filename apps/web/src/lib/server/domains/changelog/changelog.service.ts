@@ -22,7 +22,7 @@ import {
   isNull,
   inArray,
 } from '@/lib/server/db'
-import type { ChangelogId, ChangelogBoardId, PrincipalId, PostId } from '@quackback/ids'
+import type { ChangelogId, PrincipalId, PostId } from '@quackback/ids'
 import { NotFoundError, ValidationError } from '@/lib/shared/errors'
 import { markdownToTiptapJson } from '@/lib/server/markdown-tiptap'
 import { rehostExternalImages } from '@/lib/server/content/rehost-images'
@@ -32,10 +32,36 @@ import type {
   CreateChangelogInput,
   UpdateChangelogInput,
   ChangelogEntryWithDetails,
+  ChangelogBoardSummary,
   PublishState,
   ChangelogAuthor,
   ChangelogLinkedPost,
 } from './changelog.types'
+
+// ============================================================================
+// Boards
+// ============================================================================
+
+/**
+ * List changelog boards (non-deleted), ordered by position.
+ * Used by the admin board picker and board-scoped listing.
+ */
+export async function listChangelogBoards(): Promise<ChangelogBoardSummary[]> {
+  const rows = await db
+    .select({
+      id: changelogBoards.id,
+      slug: changelogBoards.slug,
+      name: changelogBoards.name,
+      description: changelogBoards.description,
+      isPublic: changelogBoards.isPublic,
+      position: changelogBoards.position,
+    })
+    .from(changelogBoards)
+    .where(isNull(changelogBoards.deletedAt))
+    .orderBy(asc(changelogBoards.position))
+
+  return rows
+}
 
 // ============================================================================
 // Create
@@ -66,10 +92,6 @@ export async function createChangelog(
     throw new ValidationError('VALIDATION_ERROR', 'Title must not exceed 200 characters')
   }
 
-  // Resolve the target board. Until multi-board UI lands, callers may omit
-  // boardId and entries fall back to the default board.
-  const boardId = input.boardId ?? (await resolveDefaultChangelogBoardId())
-
   // Determine publishedAt based on publish state
   const publishedAt = getPublishedAtFromState(input.publishState)
 
@@ -83,7 +105,7 @@ export async function createChangelog(
   const [entry] = await db
     .insert(changelogEntries)
     .values({
-      boardId,
+      boardId: input.boardId,
       title,
       content,
       contentJson,
@@ -236,9 +258,11 @@ export async function updateChangelog(
 // ============================================================================
 
 /**
- * Soft delete a changelog entry
- *
- * Sets deletedAt timestamp instead of removing the row.
+ * Soft delete a changelog entry. publishedAt is preserved so cursor
+ * pagination in public read paths still has a valid anchor when the
+ * cursor row gets deleted mid-session. Visibility is enforced by the
+ * shared `publicChangelogConditions` helper, which every public read
+ * uses to filter out `deletedAt IS NOT NULL` rows.
  *
  * @param id - Changelog entry ID
  */
@@ -367,29 +391,6 @@ async function linkPostsToChangelog(changelogId: ChangelogId, postIds: PostId[])
       }))
     )
   }
-}
-
-/**
- * Resolve the default changelog board for entries created without an explicit
- * board. Picks the lowest-position non-deleted board (the migration guarantees
- * at least the seeded 'product-updates' board exists).
- */
-async function resolveDefaultChangelogBoardId(): Promise<ChangelogBoardId> {
-  const [board] = await db
-    .select({ id: changelogBoards.id })
-    .from(changelogBoards)
-    .where(isNull(changelogBoards.deletedAt))
-    .orderBy(asc(changelogBoards.position), asc(changelogBoards.createdAt))
-    .limit(1)
-
-  if (!board) {
-    throw new NotFoundError(
-      'CHANGELOG_BOARD_NOT_FOUND',
-      'No changelog board exists. Run database migrations to create the default board.'
-    )
-  }
-
-  return board.id
 }
 
 /**

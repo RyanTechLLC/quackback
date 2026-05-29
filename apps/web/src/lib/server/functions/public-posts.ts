@@ -16,7 +16,12 @@ import {
 import { tiptapContentSchema } from '@/lib/shared/schemas/posts'
 import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
 import { getRequestHeaders } from '@tanstack/react-start/server'
-import { getOptionalAuth, requireAuth, hasAuthCredentials } from './auth-helpers'
+import {
+  getOptionalAuth,
+  requireAuth,
+  hasAuthCredentials,
+  policyActorFromAuth,
+} from './auth-helpers'
 import { getSettings } from './workspace'
 import { listPublicPosts, getAllUserVotedPostIds } from '@/lib/server/domains/posts/post.public'
 import {
@@ -33,6 +38,7 @@ import { getDefaultStatus } from '@/lib/server/domains/statuses/status.service'
 import { getMemberByUser } from '@/lib/server/domains/principals/principal.service'
 import { listPublicRoadmaps } from '@/lib/server/domains/roadmaps/roadmap.service'
 import { getPublicRoadmapPosts } from '@/lib/server/domains/roadmaps/roadmap.query'
+import { resolvePortalAccessForRequest } from './portal-access'
 
 // ============================================
 // Schemas
@@ -122,6 +128,10 @@ export type GetVoteSidebarDataInput = z.infer<typeof getVoteSidebarDataSchema>
 
 /**
  * List public posts with filtering (no auth required).
+ *
+ * Portal-visibility gate: a private portal serves no posts to a caller the
+ * portal-access resolver denies. The per-board audience filter inside
+ * `listPublicPosts` still runs as the inner layer for granted callers.
  */
 export const listPublicPostsFn = createServerFn({ method: 'GET' })
   .inputValidator(listPublicPostsSchema)
@@ -130,7 +140,21 @@ export const listPublicPostsFn = createServerFn({ method: 'GET' })
       `[fn:public-posts] listPublicPostsFn: sort=${data.sort}, board=${data.boardSlug || 'all'}`
     )
     try {
-      // No auth needed - this is public data
+      // Outer gate: private portal + unauthorized caller → no portal data.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        console.log(`[fn:public-posts] listPublicPostsFn: portal access denied, returning empty`)
+        return { items: [], hasMore: false, total: 0 }
+      }
+
+      // Resolve the actor so per-board audience + per-post moderation
+      // filters apply from the caller's perspective. Without this,
+      // listPublicPosts defaulted to ANONYMOUS_ACTOR and authenticated /
+      // segment members saw only public-audience boards even when they
+      // were entitled to more.
+      const auth = await getOptionalAuth()
+      const actor = await policyActorFromAuth(auth)
+
       const result = await listPublicPosts({
         boardSlug: data.boardSlug,
         search: data.search,
@@ -143,6 +167,7 @@ export const listPublicPostsFn = createServerFn({ method: 'GET' })
         minVotes: data.minVotes,
         dateFrom: data.dateFrom,
         responded: data.responded,
+        actor,
       })
 
       console.log(`[fn:public-posts] listPublicPostsFn: count=${result.items.length}`)
@@ -227,9 +252,24 @@ export const userEditPostFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }: { data: UserEditPostInput }) => {
     console.log(`[fn:public-posts] userEditPostFn: postId=${data.postId}`)
     try {
+      // Portal-visibility gate — see toggleVoteFn / createPublicPostFn
+      // for rationale. Denied callers must not mutate inside a portal
+      // they can't view.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        throw new Error('Portal access required')
+      }
       const ctx = await requireAuth()
       const { postId: postIdRaw, title, content, contentJson } = data
       const postId = postIdRaw as PostId
+
+      // Per-post audience gate — see assertPostViewable. The author-check
+      // inside userEditPost is sufficient for "only the author edits",
+      // but we still need to refuse to confirm existence to callers who
+      // can't see the post under its board's audience.
+      const { assertPostViewable } = await import('@/lib/server/domains/posts/post.access')
+      const policyActor = await policyActorFromAuth(ctx)
+      await assertPostViewable(postId, policyActor)
 
       // Build actor info for permission check
       const actor = {
@@ -266,8 +306,18 @@ export const userDeletePostFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }: { data: UserDeletePostInput }) => {
     console.log(`[fn:public-posts] userDeletePostFn: postId=${data.postId}`)
     try {
+      // Portal-visibility gate — see toggleVoteFn / createPublicPostFn.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        throw new Error('Portal access required')
+      }
       const ctx = await requireAuth()
       const postId = data.postId as PostId
+
+      // Per-post audience gate (404 on deny).
+      const { assertPostViewable } = await import('@/lib/server/domains/posts/post.access')
+      const policyActor = await policyActorFromAuth(ctx)
+      await assertPostViewable(postId, policyActor)
 
       // Build actor info for permission check
       const actor = {
@@ -297,7 +347,22 @@ export const toggleVoteFn = createServerFn({ method: 'POST' })
     async ({ data }: { data: ToggleVoteInput }): Promise<{ voted: boolean; voteCount: number }> => {
       console.log(`[fn:public-posts] toggleVoteFn: postId=${data.postId}`)
       try {
+        // Portal-visibility gate: a denied caller (signed-in but not on
+        // the allowlist of a private portal) must not be able to vote.
+        // Read-side gating happens at list / detail; write paths need
+        // the same check or the caller could mutate state from inside a
+        // portal they're not entitled to view.
+        const access = await resolvePortalAccessForRequest()
+        if (!access.granted) {
+          throw new Error('Portal access required')
+        }
         const ctx = await requireAuth()
+        // Per-post audience gate: portal-access alone is not enough — an
+        // authenticated caller could still vote on a team-only / segment-
+        // restricted post if they knew the id. Treat denials as 404.
+        const { assertPostViewable } = await import('@/lib/server/domains/posts/post.access')
+        const actor = await policyActorFromAuth(ctx)
+        await assertPostViewable(data.postId as PostId, actor)
 
         // Block anonymous users unless anonymousVoting is enabled
         if (ctx.principal.type === 'anonymous') {
@@ -338,20 +403,34 @@ export const createPublicPostFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }: { data: CreatePublicPostInput }) => {
     console.log(`[fn:public-posts] createPublicPostFn: boardId=${data.boardId}`)
     try {
+      // Portal-visibility gate: a denied caller must not be able to
+      // create posts inside a portal they're not entitled to view. The
+      // per-board audience check inside getPublicBoardById still runs
+      // as the inner layer for granted callers.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        throw new Error('Portal access required')
+      }
       const ctx = await requireAuth()
       const { boardId: boardIdRaw, title, content, contentJson, metadata } = data
       const boardId = boardIdRaw as BoardId
 
-      // Run all independent lookups in parallel (board, principal, defaultStatus, settings)
+      // Resolve the actor first so getPublicBoardById can apply
+      // canViewBoard internally — a "not found" framing for any
+      // audience denial preserves the previous behaviour (don't leak
+      // existence). createPost will re-check via canCreatePost with
+      // the same actor, so this stays as defense in depth.
+      const actor = await policyActorFromAuth(ctx)
+
+      // Run remaining independent lookups in parallel
       const [board, principalRecord, defaultStatus, settings] = await Promise.all([
-        getPublicBoardById(boardId),
+        getPublicBoardById(boardId, actor),
         getMemberByUser(ctx.user.id as UserId),
         getDefaultStatus(),
         getSettings(),
       ])
 
-      // Validate results
-      if (!board || !board.isPublic) {
+      if (!board) {
         throw new Error('Board not found')
       }
 
@@ -378,6 +457,7 @@ export const createPublicPostFn = createServerFn({ method: 'POST' })
         userId: ctx.user.id as UserId,
         name: ctx.user.name || ctx.user.email,
         email: ctx.user.email,
+        actor,
       }
 
       // Create the post (events dispatched by service layer)
@@ -390,7 +470,8 @@ export const createPublicPostFn = createServerFn({ method: 'POST' })
           statusId: defaultStatus?.id,
           widgetMetadata: metadata,
         },
-        author
+        author,
+        { headers: getRequestHeaders() }
       )
 
       console.log(`[fn:public-posts] createPublicPostFn: id=${post.id}`)
@@ -443,10 +524,20 @@ export const getVotedPostsFn = createServerFn({ method: 'GET' }).handler(
 
 /**
  * List public roadmaps for a workspace (no auth required).
+ *
+ * Portal-visibility gate: a private portal serves no roadmaps to a denied
+ * caller.
  */
 export const listPublicRoadmapsFn = createServerFn({ method: 'GET' }).handler(async () => {
   console.log(`[fn:public-posts] listPublicRoadmapsFn`)
   try {
+    // Outer gate: private portal + unauthorized caller → no portal data.
+    const access = await resolvePortalAccessForRequest()
+    if (!access.granted) {
+      console.log(`[fn:public-posts] listPublicRoadmapsFn: portal access denied, returning empty`)
+      return []
+    }
+
     // No auth needed - this is public data
     const result = await listPublicRoadmaps()
 
@@ -470,20 +561,42 @@ export const listPublicRoadmapsFn = createServerFn({ method: 'GET' }).handler(as
 
 /**
  * Get posts for a public roadmap (no auth required).
+ *
+ * Portal-visibility gate: a private portal serves no roadmap posts to a
+ * denied caller.
  */
 export const getPublicRoadmapPostsFn = createServerFn({ method: 'GET' })
   .inputValidator(getPublicRoadmapPostsSchema)
   .handler(async ({ data }: { data: GetPublicRoadmapPostsInput }) => {
     console.log(`[fn:public-posts] getPublicRoadmapPostsFn: roadmapId=${data.roadmapId}`)
     try {
-      // No auth needed - this is public data
+      // Outer gate: private portal + unauthorized caller → no portal data.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        console.log(
+          `[fn:public-posts] getPublicRoadmapPostsFn: portal access denied, returning empty`
+        )
+        return { items: [], hasMore: false, total: 0 }
+      }
+
+      // Resolve actor so per-board audience filters apply — a team
+      // member viewing the public roadmap should see posts from
+      // team-only boards (since they're entitled), while an anonymous
+      // viewer should not.
+      const auth = await getOptionalAuth()
+      const actor = await policyActorFromAuth(auth)
+
       const { roadmapId, statusId, limit, offset } = data
 
-      const result = await getPublicRoadmapPosts(roadmapId as RoadmapId, {
-        statusId: statusId as StatusId | undefined,
-        limit,
-        offset,
-      })
+      const result = await getPublicRoadmapPosts(
+        roadmapId as RoadmapId,
+        {
+          statusId: statusId as StatusId | undefined,
+          limit,
+          offset,
+        },
+        actor
+      )
       console.log(`[fn:public-posts] getPublicRoadmapPostsFn: count=${result.items.length}`)
 
       // Serialize branded types to plain strings for turbo-stream
@@ -514,19 +627,38 @@ export const getPublicRoadmapPostsFn = createServerFn({ method: 'GET' })
 
 /**
  * Get paginated posts for roadmap view filtered by status (legacy).
+ *
+ * Portal-visibility gate: a private portal serves no roadmap posts to a
+ * denied caller.
  */
 export const getRoadmapPostsByStatusFn = createServerFn({ method: 'GET' })
   .inputValidator(getRoadmapPostsByStatusSchema)
   .handler(async ({ data }: { data: GetRoadmapPostsByStatusInput }) => {
     console.log(`[fn:public-posts] getRoadmapPostsByStatusFn: statusId=${data.statusId}`)
     try {
-      // No auth needed - this is public data
+      // Outer gate: private portal + unauthorized caller → no portal data.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        console.log(
+          `[fn:public-posts] getRoadmapPostsByStatusFn: portal access denied, returning empty`
+        )
+        return { items: [], hasMore: false, total: 0 }
+      }
+
+      // Resolve the actor so per-board audience + per-post moderation
+      // filters apply. The legacy roadmap-by-status view used to default
+      // to ANONYMOUS_ACTOR even for authenticated team members, hiding
+      // posts on non-public boards they were entitled to see.
+      const auth = await getOptionalAuth()
+      const actor = await policyActorFromAuth(auth)
+
       const { statusId, page, limit } = data
 
       const result = await getPublicRoadmapPostsPaginated({
         statusId: statusId as StatusId,
         page,
         limit,
+        actor,
       })
       console.log(`[fn:public-posts] getRoadmapPostsByStatusFn: count=${result.items.length}`)
 
@@ -555,6 +687,35 @@ export const getVoteSidebarDataFn = createServerFn({ method: 'GET' })
     try {
       const postId = data.postId as PostId
       const noSub = { subscribed: false, level: 'none' as const, reason: null }
+      const denied = { isMember: false, canVote: false, hasVoted: false, subscriptionStatus: noSub }
+
+      // Portal-visibility gate: a caller who can't see the portal must
+      // not learn whether they've voted, whether they're a member, or
+      // anything about the post. Sibling write paths (toggleVoteFn,
+      // createPublicPostFn) gate similarly; reads return the safe
+      // default rather than throwing.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        console.log(`[fn:public-posts] getVoteSidebarDataFn: portal access denied`)
+        return denied
+      }
+
+      // Per-post audience gate: portal-granted callers can still be
+      // probing a post on a team-only / segment-restricted board. Treat
+      // a NotFound from assertPostViewable as denial (same shape — the
+      // sidebar UI degrades to the read-only state).
+      try {
+        const { assertPostViewable } = await import('@/lib/server/domains/posts/post.access')
+        const probeAuth = await getOptionalAuth()
+        const probeActor = await policyActorFromAuth(probeAuth)
+        await assertPostViewable(postId, probeActor)
+      } catch (err) {
+        if (err instanceof Error && err.name === 'NotFoundError') {
+          console.log(`[fn:public-posts] getVoteSidebarDataFn: post not viewable`)
+          return denied
+        }
+        throw err
+      }
 
       // No session cookie — check if anonymous voting is enabled
       if (!hasAuthCredentials()) {
@@ -691,16 +852,37 @@ function toRawResult(row: {
  * FTS provides a boost for exact keyword matches.
  *
  * No auth required - this is a read-only helper for the post creation form.
+ *
+ * Portal-visibility gate: a private portal must not let a denied caller
+ * enumerate post titles via this search. Team members (admin/member) using
+ * the admin merge UI are granted by the resolver, so their use is unaffected.
  */
 export const findSimilarPostsFn = createServerFn({ method: 'GET' })
   .inputValidator(findSimilarPostsSchema)
   .handler(async ({ data }): Promise<SimilarPost[]> => {
     console.log(`[fn:public-posts] findSimilarPostsFn: title="${data.title.slice(0, 30)}..."`)
     try {
-      const { db, posts, boards, postStatuses, and, isNull, desc, sql, inArray } =
+      // Outer gate: private portal + unauthorized caller → no post data.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        console.log(`[fn:public-posts] findSimilarPostsFn: portal access denied, returning empty`)
+        return []
+      }
+
+      const { db, posts, boards, postStatuses, eq, and, isNull, desc, sql, inArray } =
         await import('@/lib/server/db')
       const { generateEmbedding } =
         await import('@/lib/server/domains/embeddings/embedding.service')
+      const { postViewFilter } = await import('@/lib/server/policy')
+
+      // Resolve the actor so the audience + moderation filter applies the
+      // caller's view rules. Without this, the search returned matches
+      // from team-only / segment-restricted boards and pending posts to
+      // every caller — title-level leak even when the portal gate allowed
+      // them through on the public-portal channel.
+      const auth = await getOptionalAuth()
+      const actor = await policyActorFromAuth(auth)
+      const visibilityFilter = postViewFilter(actor)
 
       const searchQuery = data.title.trim()
       const limit = data.limit ?? 5
@@ -721,10 +903,13 @@ export const findSimilarPostsFn = createServerFn({ method: 'GET' })
             ),
         })
         .from(posts)
+        .innerJoin(boards, eq(posts.boardId, boards.id))
         .where(
           and(
             isNull(posts.deletedAt),
             isNull(posts.canonicalPostId),
+            isNull(boards.deletedAt),
+            visibilityFilter,
             sql`${posts.searchVector} @@ plainto_tsquery('english', ${searchQuery})`
           )
         )
@@ -751,10 +936,13 @@ export const findSimilarPostsFn = createServerFn({ method: 'GET' })
               score: sql<number>`1 - (${posts.embedding} <=> ${vectorStr}::vector)`.as('score'),
             })
             .from(posts)
+            .innerJoin(boards, eq(posts.boardId, boards.id))
             .where(
               and(
                 isNull(posts.deletedAt),
                 isNull(posts.canonicalPostId),
+                isNull(boards.deletedAt),
+                visibilityFilter,
                 sql`${posts.embedding} IS NOT NULL`,
                 sql`1 - (${posts.embedding} <=> ${vectorStr}::vector) >= 0.35`
               )

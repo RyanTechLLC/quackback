@@ -37,6 +37,7 @@ import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/
 import { listInboxPosts } from '@/lib/server/domains/posts/post.inbox'
 import { getPostWithDetails, getCommentsWithReplies } from '@/lib/server/domains/posts/post.query'
 import { createPost, updatePost } from '@/lib/server/domains/posts/post.service'
+import { segmentIdsForPrincipal } from '@/lib/server/domains/segments/segment-membership.service'
 import { voteOnPost, addVoteOnBehalf, removeVote } from '@/lib/server/domains/posts/post.voting'
 import { mergePost, unmergePost, getMergedPosts } from '@/lib/server/domains/posts/post.merge'
 import { softDeletePost, restorePost } from '@/lib/server/domains/posts/post.user-actions'
@@ -52,10 +53,7 @@ import {
   dismissMergeSuggestion,
   restoreMergeSuggestion,
 } from '@/lib/server/domains/merge-suggestions/merge-suggestion.service'
-import {
-  createComment,
-  deleteComment,
-} from '@/lib/server/domains/comments/comment.service'
+import { createComment, deleteComment } from '@/lib/server/domains/comments/comment.service'
 import { userEditComment } from '@/lib/server/domains/comments/comment.permissions'
 import { addReaction, removeReaction } from '@/lib/server/domains/comments/comment.reactions'
 import {
@@ -98,6 +96,7 @@ import type {
   PrincipalId,
   CommentId,
   ChangelogId,
+  ChangelogBoardId,
   RoadmapId,
   FeedbackSuggestionId,
   MergeSuggestionId,
@@ -404,6 +403,7 @@ const proxyVoteSchema = {
 }
 
 const createChangelogSchema = {
+  boardId: z.string().describe('Changelog board TypeID (changelog_board_…) this entry belongs to'),
   title: z.string().max(200).describe('Changelog entry title'),
   content: z
     .string()
@@ -551,7 +551,11 @@ const createHelpCenterArticleSchema = {
       'Article content. Markdown (GFM), max 50,000 chars. Images via ![alt](url) are auto-rehosted to workspace storage on save. See tool description for full format details.'
     ),
   slug: z.string().max(200).optional().describe('URL slug (auto-generated from title if omitted)'),
-  description: z.string().max(300).optional().describe('Short page description for SEO and article previews (max 300 chars)'),
+  description: z
+    .string()
+    .max(300)
+    .optional()
+    .describe('Short page description for SEO and article previews (max 300 chars)'),
   authorId: z
     .string()
     .optional()
@@ -579,10 +583,7 @@ const updateHelpCenterArticleSchema = {
     .describe(
       'Any ISO 8601 datetime string to publish immediately (e.g. "2026-04-08T00:00:00Z"), or null to unpublish. The exact timestamp is not used — articles are always published at the current time.'
     ),
-  authorId: z
-    .string()
-    .optional()
-    .describe('Principal TypeID to reassign as the article author'),
+  authorId: z.string().optional().describe('Principal TypeID to reassign as the article author'),
 }
 
 const deleteHelpCenterArticleSchema = {
@@ -660,6 +661,7 @@ type ProxyVoteArgs = {
 }
 
 type CreateChangelogArgs = {
+  boardId: string
   title: string
   content: string
   publish: boolean
@@ -791,6 +793,13 @@ Examples:
         if (flagDenied) return flagDenied
         const denied = requireScope(auth, 'read:help-center')
         if (denied) return denied
+        // Help-center MCP read surfaces unpublished drafts and articles
+        // under categories an admin marked private. The public help
+        // center site already serves the published+isPublic slice for
+        // anonymous and portal users; gating MCP read on team role
+        // matches the team-only intent of the inbox-style tools.
+        const roleDenied = requireTeamRole(auth)
+        if (roleDenied) return roleDenied
         try {
           return await searchArticles(args)
         } catch (err) {
@@ -800,11 +809,12 @@ Examples:
 
       const denied = requireScope(auth, 'read:feedback')
       if (denied) return denied
-      // showDeleted requires team role
-      if (args.showDeleted) {
-        const roleDenied = requireTeamRole(auth)
-        if (roleDenied) return roleDenied
-      }
+      // Posts and changelogs inbox-style listings expose pending /
+      // soft-deleted / draft / scheduled content alongside published
+      // rows. Gating these on team role keeps OAuth portal users out
+      // of the admin moderation surface.
+      const roleDenied = requireTeamRole(auth)
+      if (roleDenied) return roleDenied
       try {
         if (args.entity === 'changelogs') {
           return await searchChangelogs(args)
@@ -845,11 +855,20 @@ Examples:
           case 'post': {
             const denied = requireScope(auth, 'read:feedback')
             if (denied) return denied
+            // Posts here surface moderation/inbox fields (deletedAt,
+            // moderationState, pinnedCommentId, summaryJson...). Gate to
+            // team — portal users should hit the public portal API.
+            const roleDenied = requireTeamRole(auth)
+            if (roleDenied) return roleDenied
             return await getPostDetails(args.id as PostId)
           }
           case 'changelog': {
             const denied = requireScope(auth, 'read:feedback')
             if (denied) return denied
+            // get_details returns the raw entry including drafts /
+            // scheduled rows. Team-only matches the search gate.
+            const roleDenied = requireTeamRole(auth)
+            if (roleDenied) return roleDenied
             return await getChangelogDetails(args.id as ChangelogId)
           }
           case 'article': {
@@ -857,6 +876,13 @@ Examples:
             if (flagDenied) return flagDenied
             const denied = requireScope(auth, 'read:help-center')
             if (denied) return denied
+            // getArticleById doesn't enforce publishedAt or
+            // category.isPublic — so a portal user with the help-center
+            // OAuth scope could fetch drafts or private-category
+            // articles. The public help-center site has its own
+            // unauthenticated path for the published slice.
+            const roleDenied = requireTeamRole(auth)
+            if (roleDenied) return roleDenied
             return await getArticleDetails(args.id as HelpCenterArticleId)
           }
           case 'category': {
@@ -864,6 +890,10 @@ Examples:
             if (flagDenied) return flagDenied
             const denied = requireScope(auth, 'read:help-center')
             if (denied) return denied
+            // getCategoryById returns private categories too — keep
+            // symmetric with the article path.
+            const roleDenied = requireTeamRole(auth)
+            if (roleDenied) return roleDenied
             return await getCategoryDetails(args.id as HelpCenterCategoryId)
           }
           default:
@@ -1035,6 +1065,15 @@ Examples:
       const denied = requireScope(auth, 'write:feedback')
       if (denied) return denied
       try {
+        // MCP auth is admin/member-scoped; build a team-shaped actor so the
+        // policy gate inside createComment reflects who is doing the write.
+        const callerSegmentIds = await segmentIdsForPrincipal(auth.principalId)
+        const mcpCommentActor = {
+          principalId: auth.principalId,
+          role: auth.role,
+          principalType: auth.userId ? ('user' as const) : ('service' as const),
+          segmentIds: callerSegmentIds,
+        }
         const result = await createComment(
           {
             postId: args.postId as PostId,
@@ -1049,7 +1088,8 @@ Examples:
             email: auth.email,
             displayName: auth.name,
             role: auth.role,
-          }
+          },
+          mcpCommentActor
         )
 
         return jsonResult({
@@ -1081,6 +1121,16 @@ Examples:
       const denied = requireScope(auth, 'write:feedback')
       if (denied) return denied
       try {
+        // MCP auth is admin-scoped; build a team-shaped actor so the policy
+        // gate inside createPost bypasses moderation (admin posts are trusted).
+        const callerSegmentIds = await segmentIdsForPrincipal(auth.principalId)
+        const actor = {
+          principalId: auth.principalId,
+          role: 'admin' as const,
+          principalType: auth.userId ? ('user' as const) : ('service' as const),
+          segmentIds: callerSegmentIds,
+        }
+
         const result = await createPost(
           {
             boardId: args.boardId as BoardId,
@@ -1095,6 +1145,7 @@ Examples:
             name: auth.name,
             email: auth.email,
             displayName: auth.name,
+            actor,
           }
         )
 
@@ -1133,6 +1184,7 @@ Examples:
           : ({ type: args.publish ? 'published' : 'draft' } as const)
         const result = await createChangelog(
           {
+            boardId: args.boardId as ChangelogBoardId,
             title: args.title,
             content: args.content,
             publishState,
@@ -1238,11 +1290,10 @@ Examples:
       if (scopeDenied) return scopeDenied
       // No team role gate — the service layer allows comment authors OR team members
       try {
-        const result = await userEditComment(
-          args.commentId as CommentId,
-          args.content,
-          { principalId: auth.principalId, role: auth.role }
-        )
+        const result = await userEditComment(args.commentId as CommentId, args.content, {
+          principalId: auth.principalId,
+          role: auth.role,
+        })
 
         return jsonResult({
           id: result.id,
@@ -1296,10 +1347,29 @@ Examples:
       const denied = requireScope(auth, 'write:feedback')
       if (denied) return denied
       try {
+        // Build a team-shaped actor so the canViewPost + isPrivate
+        // gates inside add/removeReaction reflect who is reacting.
+        const callerSegmentIds = await segmentIdsForPrincipal(auth.principalId)
+        const mcpReactionActor = {
+          principalId: auth.principalId,
+          role: auth.role,
+          principalType: auth.userId ? ('user' as const) : ('service' as const),
+          segmentIds: callerSegmentIds,
+        }
         const result =
           args.action === 'add'
-            ? await addReaction(args.commentId as CommentId, args.emoji, auth.principalId)
-            : await removeReaction(args.commentId as CommentId, args.emoji, auth.principalId)
+            ? await addReaction(
+                args.commentId as CommentId,
+                args.emoji,
+                auth.principalId,
+                mcpReactionActor
+              )
+            : await removeReaction(
+                args.commentId as CommentId,
+                args.emoji,
+                auth.principalId,
+                mcpReactionActor
+              )
 
         return jsonResult({
           commentId: args.commentId,
@@ -1762,8 +1832,7 @@ Examples:
 
         const { articleId: _, publishedAt: __, authorId: ___, ...updateData } = args
         const hasUpdates =
-          Object.values(updateData).some((v) => v !== undefined) ||
-          authorPrincipalId !== undefined
+          Object.values(updateData).some((v) => v !== undefined) || authorPrincipalId !== undefined
 
         // Validate + apply field/author updates first so a bad authorId
         // never leaves the article in a partially-published state.

@@ -40,6 +40,8 @@ export const Route = createFileRoute('/widget/')({
       new Set(portalData.votedPostIds)
     )
 
+    const { getBaseUrl } = await import('@/lib/server/config')
+
     return {
       posts: portalData.posts.items.map((p) => ({
         id: p.id,
@@ -55,13 +57,16 @@ export const Route = createFileRoute('/widget/')({
         name: s.name,
         color: s.color,
       })),
-      boards: portalData.boards
-        .filter((b) => b.isPublic)
-        .map((b) => ({
-          id: b.id as string,
-          name: b.name,
-          slug: b.slug,
-        })),
+      // fetchPortalData already filtered boards through boardViewFilter
+      // against the request actor (including widget-supplied segments via
+      // the signed identity token). Re-filtering by audience.kind here
+      // would silently drop authenticated/segment boards that the actor
+      // is legitimately allowed to see.
+      boards: portalData.boards.map((b) => ({
+        id: b.id as string,
+        name: b.name,
+        slug: b.slug,
+      })),
       orgSlug: settings?.slug ?? '',
       features: {
         anonymousVoting: settings?.publicPortalConfig?.features?.anonymousVoting ?? true,
@@ -78,6 +83,14 @@ export const Route = createFileRoute('/widget/')({
       },
       imageUploadsInWidget: settings?.publicWidgetConfig?.imageUploadsInWidget ?? true,
       defaultBoard: settings?.publicWidgetConfig?.defaultBoard,
+      portalAccess: {
+        isPrivate: settings?.publicPortalConfig?.portalAccess?.isPrivate ?? false,
+        widgetSignIn: settings?.publicPortalConfig?.portalAccess?.widgetSignIn ?? false,
+      },
+      // The portal's own origin (BASE_URL env), resolved server-side so the
+      // widget handoff URL always points at the portal host — not at the widget
+      // iframe origin, which may differ in self-hosted deployments.
+      portalOrigin: getBaseUrl(),
     }
   },
   component: WidgetPage,
@@ -112,6 +125,8 @@ function WidgetPage() {
     tabs,
     imageUploadsInWidget,
     defaultBoard,
+    portalAccess,
+    portalOrigin,
   } = Route.useLoaderData()
   const { isIdentified, ensureSession } = useWidgetAuth()
   const canVote = isIdentified || features.anonymousVoting
@@ -250,6 +265,8 @@ function WidgetPage() {
       onTabChange={handleTabChange}
       onBack={shellOnBack}
       enabledTabs={tabs}
+      portalAccess={portalAccess}
+      portalOrigin={portalOrigin}
     >
       {view === 'changelog' && <WidgetChangelog onEntrySelect={handleChangelogEntrySelect} />}
 

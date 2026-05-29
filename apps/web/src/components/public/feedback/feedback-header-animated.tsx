@@ -55,7 +55,7 @@ export function FeedbackHeaderAnimated({
   const createPost = useCreatePublicPost()
   const ensureAnonSession = useEnsureAnonSession()
   const anonymousPostingEnabled = settings?.publicPortalConfig?.features?.anonymousPosting ?? false
-  const richMediaEnabled = settings?.publicPortalConfig?.features?.richMediaInPosts ?? true
+  const richMediaEnabled = true
 
   // Identified users post as themselves; anonymous posting is handled separately.
   const isAnonymousSession = session?.user?.principalType === 'anonymous'

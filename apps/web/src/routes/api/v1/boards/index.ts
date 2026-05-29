@@ -7,8 +7,13 @@ import {
   badRequestResponse,
   handleDomainError,
 } from '@/lib/server/domains/api/responses'
-
-// Input validation schema
+// Input validation schema — `audience` is intentionally excluded, matching
+// the matching strip on PATCH /api/v1/boards/:boardId. Visibility is a
+// policy-level setting changed only via updateBoardAccessFn (admin-only,
+// audited); accepting `audience` here would let a member-role API key
+// silently create a board with restricted visibility (or, worse,
+// `{kind:'segments', segmentIds:[]}` — a board no one can see) without an
+// audit event. New boards default to `{kind:'public'}` in createBoard.
 const createBoardSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
   slug: z
@@ -18,7 +23,6 @@ const createBoardSchema = z.object({
     .regex(/^[a-z0-9-]+$/, 'Slug must contain only lowercase letters, numbers, and hyphens')
     .optional(),
   description: z.string().max(500).optional(),
-  isPublic: z.boolean().optional().default(true),
 })
 
 export const Route = createFileRoute('/api/v1/boards/')({
@@ -44,7 +48,7 @@ export const Route = createFileRoute('/api/v1/boards/')({
               name: board.name,
               slug: board.slug,
               description: board.description,
-              isPublic: board.isPublic,
+              audience: board.audience,
               postCount: board.postCount,
               createdAt: board.createdAt.toISOString(),
               updatedAt: board.updatedAt.toISOString(),
@@ -80,7 +84,6 @@ export const Route = createFileRoute('/api/v1/boards/')({
             name: parsed.data.name,
             slug: parsed.data.slug,
             description: parsed.data.description,
-            isPublic: parsed.data.isPublic,
           })
 
           return createdResponse({
@@ -88,7 +91,7 @@ export const Route = createFileRoute('/api/v1/boards/')({
             name: board.name,
             slug: board.slug,
             description: board.description,
-            isPublic: board.isPublic,
+            audience: board.audience,
             createdAt: board.createdAt.toISOString(),
             updatedAt: board.updatedAt.toISOString(),
           })

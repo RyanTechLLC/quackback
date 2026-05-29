@@ -102,6 +102,8 @@ interface S3Module {
     endpoint?: string
     forcePathStyle: boolean
     credentials: { accessKeyId: string; secretAccessKey: string }
+    requestChecksumCalculation?: 'WHEN_REQUIRED' | 'WHEN_SUPPORTED'
+    responseChecksumValidation?: 'WHEN_REQUIRED' | 'WHEN_SUPPORTED'
   }) => S3ClientInstance
   PutObjectCommand: new (input: BucketKeyInput) => S3Command
   GetObjectCommand: new (input: BucketKeyInput) => S3Command
