@@ -24,7 +24,8 @@ export const changelogKeys = {
   all: ['changelogs'] as const,
   boards: () => [...changelogKeys.all, 'boards'] as const,
   lists: () => [...changelogKeys.all, 'list'] as const,
-  list: (filters: { status?: string }) => [...changelogKeys.lists(), filters] as const,
+  list: (filters: { status?: string; boardId?: string }) =>
+    [...changelogKeys.lists(), filters] as const,
   details: () => [...changelogKeys.all, 'detail'] as const,
   detail: (id: ChangelogId) => [...changelogKeys.details(), id] as const,
   public: () => [...changelogKeys.all, 'public'] as const,
@@ -36,13 +37,14 @@ export const changelogKeys = {
  * Admin changelog queries
  */
 export const changelogQueries = {
-  list: (params: { status?: 'draft' | 'scheduled' | 'published' | 'all' }) =>
+  list: (params: { status?: 'draft' | 'scheduled' | 'published' | 'all'; boardId?: string }) =>
     infiniteQueryOptions({
       queryKey: changelogKeys.list(params),
       queryFn: ({ pageParam }) =>
         listChangelogsFn({
           data: {
             status: params.status,
+            boardId: params.boardId,
             cursor: pageParam,
             limit: 20,
           },

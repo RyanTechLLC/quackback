@@ -17,6 +17,9 @@ import {
   deleteChangelog,
   getChangelogById,
   listChangelogBoards,
+  createChangelogBoard,
+  updateChangelogBoard,
+  deleteChangelogBoard,
 } from '@/lib/server/domains/changelog/changelog.service'
 import { listChangelogs, searchShippedPosts } from '@/lib/server/domains/changelog/changelog.query'
 import {
@@ -32,6 +35,9 @@ import {
   getChangelogSchema,
   deleteChangelogSchema,
   listPublicChangelogsSchema,
+  createChangelogBoardSchema,
+  updateChangelogBoardSchema,
+  deleteChangelogBoardSchema,
 } from '@/lib/shared/schemas/changelog'
 import { toIsoString, toIsoStringOrNull } from '@/lib/shared/utils'
 
@@ -175,6 +181,7 @@ export const listChangelogsFn = createServerFn({ method: 'GET' })
 
       const result = await listChangelogs({
         status: data.status,
+        boardId: data.boardId as ChangelogBoardId | undefined,
         cursor: data.cursor,
         limit: data.limit,
       })
@@ -293,4 +300,54 @@ export const searchShippedPostsFn = createServerFn({ method: 'GET' })
       console.error(`[fn:changelog] searchShippedPostsFn failed:`, error)
       throw error
     }
+  })
+
+// ============================================================================
+// Changelog Board Server Functions (Require Auth)
+//
+// NOTE: keep these AFTER searchShippedPostsFn — portal-gate-extended.test.ts
+// indexes changelog server functions positionally, so appending here avoids
+// shifting the public-changelog handler indices.
+// ============================================================================
+
+/**
+ * Create a new changelog board
+ */
+export const createChangelogBoardFn = createServerFn({ method: 'POST' })
+  .inputValidator(createChangelogBoardSchema)
+  .handler(async ({ data }) => {
+    await requireAuth({ roles: ['admin', 'member'] })
+    const board = await createChangelogBoard({
+      name: data.name,
+      slug: data.slug,
+      description: data.description,
+      isPublic: data.isPublic,
+    })
+    return { ...board, id: String(board.id) }
+  })
+
+/**
+ * Update an existing changelog board
+ */
+export const updateChangelogBoardFn = createServerFn({ method: 'POST' })
+  .inputValidator(updateChangelogBoardSchema)
+  .handler(async ({ data }) => {
+    await requireAuth({ roles: ['admin', 'member'] })
+    const board = await updateChangelogBoard(data.id as ChangelogBoardId, {
+      name: data.name,
+      description: data.description ?? undefined,
+      isPublic: data.isPublic,
+    })
+    return { ...board, id: String(board.id) }
+  })
+
+/**
+ * Delete (soft) a changelog board
+ */
+export const deleteChangelogBoardFn = createServerFn({ method: 'POST' })
+  .inputValidator(deleteChangelogBoardSchema)
+  .handler(async ({ data }) => {
+    await requireAuth({ roles: ['admin', 'member'] })
+    await deleteChangelogBoard(data.id as ChangelogBoardId)
+    return { success: true }
   })

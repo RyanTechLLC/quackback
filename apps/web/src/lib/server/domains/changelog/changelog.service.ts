@@ -21,9 +21,10 @@ import {
   asc,
   isNull,
   inArray,
+  sql,
 } from '@/lib/server/db'
-import type { ChangelogId, PrincipalId, PostId } from '@quackback/ids'
-import { NotFoundError, ValidationError } from '@/lib/shared/errors'
+import type { ChangelogId, ChangelogBoardId, PrincipalId, PostId } from '@quackback/ids'
+import { NotFoundError, ValidationError, ConflictError } from '@/lib/shared/errors'
 import { markdownToTiptapJson } from '@/lib/server/markdown-tiptap'
 import { rehostExternalImages } from '@/lib/server/content/rehost-images'
 import { buildEventActor, dispatchChangelogPublished } from '@/lib/server/events/dispatch'
@@ -31,6 +32,8 @@ import { scheduleDispatch, cancelScheduledDispatch } from '@/lib/server/events/s
 import type {
   CreateChangelogInput,
   UpdateChangelogInput,
+  CreateChangelogBoardInput,
+  UpdateChangelogBoardInput,
   ChangelogEntryWithDetails,
   ChangelogBoardSummary,
   PublishState,
@@ -61,6 +64,134 @@ export async function listChangelogBoards(): Promise<ChangelogBoardSummary[]> {
     .orderBy(asc(changelogBoards.position))
 
   return rows
+}
+
+/**
+ * Create a new changelog board. Mirrors the roadmap-board create flow:
+ * validates name/slug, rejects duplicate slugs, and appends at the end
+ * of the position order.
+ */
+export async function createChangelogBoard(
+  input: CreateChangelogBoardInput
+): Promise<ChangelogBoardSummary> {
+  if (!input.name?.trim()) {
+    throw new ValidationError('VALIDATION_ERROR', 'Name is required')
+  }
+  if (!input.slug?.trim()) {
+    throw new ValidationError('VALIDATION_ERROR', 'Slug is required')
+  }
+  if (input.name.length > 100) {
+    throw new ValidationError('VALIDATION_ERROR', 'Name must be 100 characters or less')
+  }
+  if (!/^[a-z0-9-]+$/.test(input.slug)) {
+    throw new ValidationError(
+      'VALIDATION_ERROR',
+      'Slug must contain only lowercase letters, numbers, and hyphens'
+    )
+  }
+
+  const existing = await db.query.changelogBoards.findFirst({
+    where: eq(changelogBoards.slug, input.slug),
+  })
+  if (existing) {
+    throw new ConflictError(
+      'DUPLICATE_SLUG',
+      `A changelog board with slug "${input.slug}" already exists`
+    )
+  }
+
+  const positionResult = await db
+    .select({ maxPosition: sql<number>`COALESCE(MAX(${changelogBoards.position}), -1)` })
+    .from(changelogBoards)
+  const position = (positionResult[0]?.maxPosition ?? -1) + 1
+
+  const [board] = await db
+    .insert(changelogBoards)
+    .values({
+      name: input.name.trim(),
+      slug: input.slug.trim(),
+      description: input.description?.trim() || null,
+      isPublic: input.isPublic ?? true,
+      position,
+    })
+    .returning({
+      id: changelogBoards.id,
+      slug: changelogBoards.slug,
+      name: changelogBoards.name,
+      description: changelogBoards.description,
+      isPublic: changelogBoards.isPublic,
+      position: changelogBoards.position,
+    })
+
+  return board
+}
+
+/**
+ * Update a changelog board's name / description / visibility.
+ */
+export async function updateChangelogBoard(
+  id: ChangelogBoardId,
+  input: UpdateChangelogBoardInput
+): Promise<ChangelogBoardSummary> {
+  if (input.name !== undefined && !input.name.trim()) {
+    throw new ValidationError('VALIDATION_ERROR', 'Name cannot be empty')
+  }
+  if (input.name && input.name.length > 100) {
+    throw new ValidationError('VALIDATION_ERROR', 'Name must be 100 characters or less')
+  }
+
+  const updateData: Record<string, unknown> = { updatedAt: new Date() }
+  if (input.name !== undefined) updateData.name = input.name.trim()
+  if (input.description !== undefined) updateData.description = input.description?.trim() || null
+  if (input.isPublic !== undefined) updateData.isPublic = input.isPublic
+
+  const [updated] = await db
+    .update(changelogBoards)
+    .set(updateData)
+    .where(and(eq(changelogBoards.id, id), isNull(changelogBoards.deletedAt)))
+    .returning({
+      id: changelogBoards.id,
+      slug: changelogBoards.slug,
+      name: changelogBoards.name,
+      description: changelogBoards.description,
+      isPublic: changelogBoards.isPublic,
+      position: changelogBoards.position,
+    })
+
+  if (!updated) {
+    throw new NotFoundError('CHANGELOG_BOARD_NOT_FOUND', `Changelog board with ID ${id} not found`)
+  }
+
+  return updated
+}
+
+/**
+ * Soft-delete a changelog board. Entries on the board are left intact (their
+ * board_id FK still points at the now-deleted board); the admin is expected to
+ * move or remove them. Refuses to delete the last remaining board so changelog
+ * entries always have a home (the create flow requires a board).
+ */
+export async function deleteChangelogBoard(id: ChangelogBoardId): Promise<void> {
+  const remaining = await db
+    .select({ id: changelogBoards.id })
+    .from(changelogBoards)
+    .where(isNull(changelogBoards.deletedAt))
+  if (remaining.length <= 1) {
+    throw new ValidationError(
+      'LAST_CHANGELOG_BOARD',
+      'Cannot delete the only changelog board. Create another board first.'
+    )
+  }
+
+  const result = await db
+    .update(changelogBoards)
+    .set({ deletedAt: new Date() })
+    .where(and(eq(changelogBoards.id, id), isNull(changelogBoards.deletedAt)))
+    .returning({ id: changelogBoards.id })
+
+  if (result.length === 0) {
+    throw new NotFoundError('CHANGELOG_BOARD_NOT_FOUND', `Changelog board with ID ${id} not found`)
+  }
 }
 
 // ============================================================================

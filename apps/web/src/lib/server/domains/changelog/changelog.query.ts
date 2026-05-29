@@ -35,11 +35,16 @@ import type {
  * @returns Paginated list of changelog entries
  */
 export async function listChangelogs(params: ListChangelogParams): Promise<ChangelogListResult> {
-  const { status = 'all', cursor, limit = 20 } = params
+  const { status = 'all', boardId, cursor, limit = 20 } = params
   const now = new Date()
 
   // Build where conditions - always exclude soft-deleted entries
   const conditions: SQL<unknown>[] = [isNull(changelogEntries.deletedAt)]
+
+  // Filter to a single board when requested
+  if (boardId) {
+    conditions.push(eq(changelogEntries.boardId, boardId))
+  }
 
   // Filter by status
   if (status === 'draft') {

@@ -23,9 +23,14 @@ import { ChangelogMetadataSidebarContent } from './changelog-metadata-sidebar-co
 
 interface CreateChangelogDialogProps {
   onChangelogCreated?: () => void
+  /** Pre-select this board (e.g. the board currently selected in the sidebar). */
+  defaultBoardId?: string
 }
 
-export function CreateChangelogDialog({ onChangelogCreated }: CreateChangelogDialogProps) {
+export function CreateChangelogDialog({
+  onChangelogCreated,
+  defaultBoardId,
+}: CreateChangelogDialogProps) {
   const [open, setOpen] = useState(false)
   const [contentJson, setContentJson] = useState<JSONContent | null>(null)
   const [linkedPostIds, setLinkedPostIds] = useState<PostId[]>([])
@@ -36,7 +41,7 @@ export function CreateChangelogDialog({ onChangelogCreated }: CreateChangelogDia
   const form = useForm({
     resolver: standardSchemaResolver(createChangelogSchema),
     defaultValues: {
-      boardId: '',
+      boardId: defaultBoardId ?? '',
       title: '',
       content: '',
       linkedPostIds: [] as string[],
