@@ -14,7 +14,7 @@ import {
   desc,
   inArray,
 } from '@/lib/server/db'
-import type { ChangelogId, StatusId } from '@quackback/ids'
+import type { ChangelogId, ChangelogBoardId, StatusId } from '@quackback/ids'
 import { NotFoundError } from '@/lib/shared/errors'
 import { computeStatus } from './changelog.service'
 import type { PublicChangelogEntry, PublicChangelogListResult } from './changelog.types'
@@ -23,23 +23,28 @@ import type { PublicChangelogEntry, PublicChangelogListResult } from './changelo
  * Predicates that make a changelog entry publicly visible: not soft-deleted
  * and published at or before `now`. Shared by every public read path so the
  * filter stays consistent.
+ *
+ * Board visibility: by default only entries on a public, non-deleted board are
+ * returned — a private board (isPublic=false) is team/staff only and must never
+ * surface in the anonymous changelog, sitemap, or RSS feed. When the caller is
+ * a verified team member (`includePrivateBoards: true`), private boards are
+ * included so staff can preview them from the portal.
  */
-export function publicChangelogConditions(now: Date) {
+export function publicChangelogConditions(
+  now: Date,
+  opts: { includePrivateBoards?: boolean } = {}
+) {
+  const boardWhere = opts.includePrivateBoards
+    ? isNull(changelogBoards.deletedAt)
+    : and(eq(changelogBoards.isPublic, true), isNull(changelogBoards.deletedAt))
+
   return [
     isNull(changelogEntries.deletedAt),
     isNotNull(changelogEntries.publishedAt),
     lte(changelogEntries.publishedAt, now),
-    // Board visibility: only entries on a public, non-deleted board are
-    // exposed publicly. A private board (isPublic=false) is team/staff
-    // only — its entries must never surface in the public changelog,
-    // sitemap, or RSS feed. Centralizing this here covers every public
-    // read path that shares this helper.
     inArray(
       changelogEntries.boardId,
-      db
-        .select({ id: changelogBoards.id })
-        .from(changelogBoards)
-        .where(and(eq(changelogBoards.isPublic, true), isNull(changelogBoards.deletedAt)))
+      db.select({ id: changelogBoards.id }).from(changelogBoards).where(boardWhere)
     ),
   ]
 }
@@ -50,11 +55,14 @@ export function publicChangelogConditions(now: Date) {
  * @param id - Changelog entry ID
  * @returns Public changelog entry
  */
-export async function getPublicChangelogById(id: ChangelogId): Promise<PublicChangelogEntry> {
+export async function getPublicChangelogById(
+  id: ChangelogId,
+  opts: { includePrivateBoards?: boolean } = {}
+): Promise<PublicChangelogEntry> {
   const now = new Date()
 
   const entry = await db.query.changelogEntries.findFirst({
-    where: and(eq(changelogEntries.id, id), ...publicChangelogConditions(now)),
+    where: and(eq(changelogEntries.id, id), ...publicChangelogConditions(now, opts)),
   })
 
   if (!entry || !entry.publishedAt) {
@@ -147,11 +155,20 @@ export async function getPublicChangelogById(id: ChangelogId): Promise<PublicCha
 export async function listPublicChangelogs(params: {
   cursor?: string
   limit?: number
+  boardId?: ChangelogBoardId
+  includePrivateBoards?: boolean
 }): Promise<PublicChangelogListResult> {
-  const { cursor, limit = 20 } = params
+  const { cursor, limit = 20, boardId, includePrivateBoards } = params
   const now = new Date()
 
-  const conditions = publicChangelogConditions(now)
+  const conditions = publicChangelogConditions(now, { includePrivateBoards })
+
+  // Optional single-board filter. Board *visibility* is still enforced by
+  // publicChangelogConditions above, so a non-team caller passing a private
+  // board's id simply gets an empty list (never a leak).
+  if (boardId) {
+    conditions.push(eq(changelogEntries.boardId, boardId))
+  }
 
   // Cursor-based pagination. The lookup does NOT filter on deletedAt:
   // if an admin deleted the cursor row between page load and "Load

@@ -26,15 +26,20 @@
  *  12  fetchPublicRoadmapPosts
  *  13  getCommentsSectionDataFn
  *
- * Handler registration order (changelog.ts):
+ * Handler registration order (changelog.ts) — see the index constants below:
  *   0  createChangelogFn
- *   1  updateChangelogFn
- *   2  deleteChangelogFn
- *   3  getChangelogFn
- *   4  listChangelogsFn
- *   5  getPublicChangelogFn
- *   6  listPublicChangelogsFn
- *   7  searchShippedPostsFn
+ *   1  listChangelogBoardsFn
+ *   2  updateChangelogFn
+ *   3  deleteChangelogFn
+ *   4  getChangelogFn
+ *   5  listChangelogsFn
+ *   6  getPublicChangelogFn
+ *   7  listPublicChangelogsFn
+ *   8  listPublicChangelogBoardsFn
+ *   9  searchShippedPostsFn
+ *  10  createChangelogBoardFn
+ *  11  updateChangelogBoardFn
+ *  12  deleteChangelogBoardFn
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -179,11 +184,14 @@ vi.mock('@/lib/server/domains/changelog/changelog.public', () => ({
   publicChangelogConditions: vi.fn().mockReturnValue([]),
 }))
 
+const mockListChangelogBoards = vi.fn()
+
 vi.mock('@/lib/server/domains/changelog/changelog.service', () => ({
   createChangelog: vi.fn(),
   updateChangelog: vi.fn(),
   deleteChangelog: vi.fn(),
   getChangelogById: vi.fn(),
+  listChangelogBoards: (...a: unknown[]) => mockListChangelogBoards(...a),
 }))
 
 vi.mock('@/lib/server/domains/changelog/changelog.query', () => ({
@@ -258,10 +266,12 @@ const FETCH_PUBLIC_ROADMAP_POSTS = 12
 
 // Changelog handler indices (definition order in functions/changelog.ts):
 // 0 create, 1 listBoards, 2 update, 3 delete, 4 get, 5 list,
-// 6 getPublic, 7 listPublic, 8 searchShipped
+// 6 getPublic, 7 listPublic, 8 listPublicBoards, 9 searchShipped,
+// 10 createBoard, 11 updateBoard, 12 deleteBoard
 const CHANGELOG = '@/lib/server/functions/changelog' as const
 const GET_PUBLIC_CHANGELOG = 6
 const LIST_PUBLIC_CHANGELOGS = 7
+const LIST_PUBLIC_CHANGELOG_BOARDS = 8
 
 // ---------------------------------------------------------------------------
 // portal.ts — fetchPortalData
@@ -696,5 +706,68 @@ describe('changelog.ts listPublicChangelogsFn — portal-visibility gate', () =>
     }
     expect(result.items).toHaveLength(1)
     expect(result.items[0].id).toBe('cl_2')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// changelog.ts — listPublicChangelogBoardsFn (board visibility)
+// ---------------------------------------------------------------------------
+
+describe('changelog.ts listPublicChangelogBoardsFn — board visibility', () => {
+  const PUBLIC_BOARD = {
+    id: 'changelog_board_public',
+    name: 'Product Updates',
+    slug: 'product-updates',
+    description: null,
+    isPublic: true,
+    position: 0,
+  }
+  const PRIVATE_BOARD = {
+    id: 'changelog_board_private',
+    name: 'Internal Notes',
+    slug: 'internal',
+    description: null,
+    isPublic: false,
+    position: 1,
+  }
+
+  it('returns an empty list when a private portal blocks the caller', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthorized' })
+    mockListChangelogBoards.mockResolvedValue([PUBLIC_BOARD, PRIVATE_BOARD])
+    const h = await loadModule(CHANGELOG)
+
+    const result = (await h[LIST_PUBLIC_CHANGELOG_BOARDS]({ data: {} })) as { boards: unknown[] }
+    expect(result.boards).toEqual([])
+    // Must not even read the boards when access is denied.
+    expect(mockListChangelogBoards).not.toHaveBeenCalled()
+  })
+
+  it('hides private boards from a non-team viewer', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+    mockListChangelogBoards.mockResolvedValue([PUBLIC_BOARD, PRIVATE_BOARD])
+    // isTeamMember mock defaults to false → non-team viewer
+    const h = await loadModule(CHANGELOG)
+
+    const result = (await h[LIST_PUBLIC_CHANGELOG_BOARDS]({ data: {} })) as {
+      boards: { id: string; isPublic: boolean }[]
+    }
+    expect(result.boards).toHaveLength(1)
+    expect(result.boards[0].id).toBe('changelog_board_public')
+  })
+
+  it('shows private boards to a team member', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'team' })
+    mockListChangelogBoards.mockResolvedValue([PUBLIC_BOARD, PRIVATE_BOARD])
+    const { isTeamMember } = await import('@/lib/shared/roles')
+    vi.mocked(isTeamMember).mockReturnValueOnce(true)
+    const h = await loadModule(CHANGELOG)
+
+    const result = (await h[LIST_PUBLIC_CHANGELOG_BOARDS]({ data: {} })) as {
+      boards: { id: string }[]
+    }
+    expect(result.boards.map((b) => b.id)).toEqual([
+      'changelog_board_public',
+      'changelog_board_private',
+    ])
   })
 })

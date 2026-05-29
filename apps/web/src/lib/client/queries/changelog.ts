@@ -11,6 +11,7 @@ import {
   getChangelogFn,
   listChangelogBoardsFn,
   listPublicChangelogsFn,
+  listPublicChangelogBoardsFn,
   getPublicChangelogFn,
 } from '@/lib/server/functions/changelog'
 
@@ -29,7 +30,9 @@ export const changelogKeys = {
   details: () => [...changelogKeys.all, 'detail'] as const,
   detail: (id: ChangelogId) => [...changelogKeys.details(), id] as const,
   public: () => [...changelogKeys.all, 'public'] as const,
-  publicList: () => [...changelogKeys.public(), 'list'] as const,
+  publicBoards: () => [...changelogKeys.public(), 'boards'] as const,
+  publicList: (filters: { boardId?: string } = {}) =>
+    [...changelogKeys.public(), 'list', filters] as const,
   publicDetail: (id: ChangelogId) => [...changelogKeys.public(), 'detail', id] as const,
 }
 
@@ -73,18 +76,27 @@ export const changelogQueries = {
  * Public changelog queries
  */
 export const publicChangelogQueries = {
-  list: () =>
+  list: (params: { boardId?: string } = {}) =>
     infiniteQueryOptions({
-      queryKey: changelogKeys.publicList(),
+      queryKey: changelogKeys.publicList(params),
       queryFn: ({ pageParam }) =>
         listPublicChangelogsFn({
           data: {
+            boardId: params.boardId,
             cursor: pageParam,
             limit: 10,
           },
         }),
       initialPageParam: undefined as string | undefined,
       getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+      staleTime: STALE_TIME_MEDIUM,
+    }),
+
+  /** Boards visible to the current portal viewer (public + private-if-team). */
+  boards: () =>
+    queryOptions({
+      queryKey: changelogKeys.publicBoards(),
+      queryFn: () => listPublicChangelogBoardsFn(),
       staleTime: STALE_TIME_MEDIUM,
     }),
 

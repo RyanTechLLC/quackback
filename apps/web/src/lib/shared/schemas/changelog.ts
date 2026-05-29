@@ -92,6 +92,7 @@ export const deleteChangelogSchema = z.object({
  * List public changelogs params schema
  */
 export const listPublicChangelogsSchema = z.object({
+  boardId: z.string().optional(),
   cursor: z.string().optional(),
   limit: z.number().int().positive().max(100).optional(),
 })

@@ -9,7 +9,8 @@ import type { BoardId, ChangelogId, ChangelogBoardId, PostId } from '@quackback/
 // Note: BoardId is only used for searchShippedPosts filtering
 import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
 import { NotFoundError } from '@/lib/shared/errors'
-import { requireAuth } from './auth-helpers'
+import { requireAuth, getOptionalAuth } from './auth-helpers'
+import { isTeamMember } from '@/lib/shared/roles'
 import { resolvePortalAccessForRequest } from './portal-access'
 import {
   createChangelog,
@@ -226,7 +227,12 @@ export const getPublicChangelogFn = createServerFn({ method: 'GET' })
         )
       }
 
-      const entry = await getPublicChangelogById(data.id as ChangelogId)
+      // Team members (admin/member) may preview entries on private boards
+      // from the portal; everyone else sees public-board entries only.
+      const viewer = await getOptionalAuth()
+      const includePrivateBoards = isTeamMember(viewer?.principal.role)
+
+      const entry = await getPublicChangelogById(data.id as ChangelogId, { includePrivateBoards })
 
       return {
         ...entry,
@@ -253,7 +259,14 @@ export const listPublicChangelogsFn = createServerFn({ method: 'GET' })
         return { items: [], nextCursor: null, hasMore: false }
       }
 
+      // Team members (admin/member) may browse private boards from the
+      // portal; everyone else is restricted to public boards.
+      const viewer = await getOptionalAuth()
+      const includePrivateBoards = isTeamMember(viewer?.principal.role)
+
       const result = await listPublicChangelogs({
+        boardId: data.boardId as ChangelogBoardId | undefined,
+        includePrivateBoards,
         cursor: data.cursor,
         limit: data.limit,
       })
@@ -270,6 +283,41 @@ export const listPublicChangelogsFn = createServerFn({ method: 'GET' })
       throw error
     }
   })
+
+/**
+ * List changelog boards visible to the current portal viewer.
+ *
+ * Public boards are returned to everyone; private boards are returned only to
+ * verified team members (admin/member). A private portal that denies the
+ * caller yields an empty list, mirroring listPublicChangelogsFn.
+ */
+export const listPublicChangelogBoardsFn = createServerFn({ method: 'GET' }).handler(async () => {
+  try {
+    const access = await resolvePortalAccessForRequest()
+    if (!access.granted) {
+      return { boards: [] }
+    }
+
+    const viewer = await getOptionalAuth()
+    const includePrivate = isTeamMember(viewer?.principal.role)
+
+    const boards = await listChangelogBoards()
+    const visible = boards.filter((b) => b.isPublic || includePrivate)
+
+    return {
+      boards: visible.map((b) => ({
+        id: String(b.id),
+        name: b.name,
+        slug: b.slug,
+        description: b.description,
+        isPublic: b.isPublic,
+      })),
+    }
+  } catch (error) {
+    console.error(`[fn:changelog] listPublicChangelogBoardsFn failed:`, error)
+    throw error
+  }
+})
 
 // ============================================================================
 // Shipped Posts Search (for linking)
