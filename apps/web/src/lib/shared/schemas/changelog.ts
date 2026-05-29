@@ -41,10 +41,35 @@ export const updateChangelogSchema = z.object({
 })
 
 /**
+ * Changelog board schemas
+ */
+export const createChangelogBoardSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(100),
+  slug: z
+    .string()
+    .min(1)
+    .regex(/^[a-z0-9-]+$/, 'Slug must contain only lowercase letters, numbers, and hyphens'),
+  description: z.string().optional(),
+  isPublic: z.boolean().optional(),
+})
+
+export const updateChangelogBoardSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(100).optional(),
+  description: z.string().nullable().optional(),
+  isPublic: z.boolean().optional(),
+})
+
+export const deleteChangelogBoardSchema = z.object({
+  id: z.string().min(1),
+})
+
+/**
  * List changelogs params schema
  */
 export const listChangelogsSchema = z.object({
   status: z.enum(['draft', 'scheduled', 'published', 'all']).optional(),
+  boardId: z.string().optional(),
   cursor: z.string().optional(),
   limit: z.number().int().positive().max(100).optional(),
 })

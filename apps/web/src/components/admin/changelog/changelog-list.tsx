@@ -40,7 +40,12 @@ function ChangelogSkeleton() {
   )
 }
 
-export function ChangelogList() {
+interface ChangelogListProps {
+  /** When set, only entries on this changelog board are shown. */
+  boardId?: string
+}
+
+export function ChangelogList({ boardId }: ChangelogListProps = {}) {
   const navigate = useNavigate({ from: Route.fullPath })
   const search = Route.useSearch()
   const { filters, setFilters, hasActiveFilters } = useChangelogFilters()
@@ -55,7 +60,7 @@ export function ChangelogList() {
   })
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteQuery(
-    changelogQueries.list({ status: filters.status })
+    changelogQueries.list({ status: filters.status, boardId })
   )
 
   const loadMoreRef = useInfiniteScroll({
@@ -148,7 +153,7 @@ export function ChangelogList() {
           <AdminListHeader
             searchValue={searchValue}
             onSearchChange={setSearchValue}
-            action={<CreateChangelogDialog />}
+            action={<CreateChangelogDialog defaultBoardId={boardId} />}
           />
 
           {/* List */}
@@ -164,7 +169,11 @@ export function ChangelogList() {
                     ? 'No changelog entries match your filters'
                     : 'No changelog entries yet'
               }
-              action={!hasActiveFilters && !filters.search ? <CreateChangelogDialog /> : undefined}
+              action={
+                !hasActiveFilters && !filters.search ? (
+                  <CreateChangelogDialog defaultBoardId={boardId} />
+                ) : undefined
+              }
               className="h-48"
             />
           ) : (

@@ -198,6 +198,9 @@ vi.mock('@/lib/shared/schemas/changelog', () => ({
   getChangelogSchema: { parse: (v: unknown) => v },
   deleteChangelogSchema: { parse: (v: unknown) => v },
   listPublicChangelogsSchema: { parse: (v: unknown) => v },
+  createChangelogBoardSchema: { parse: (v: unknown) => v },
+  updateChangelogBoardSchema: { parse: (v: unknown) => v },
+  deleteChangelogBoardSchema: { parse: (v: unknown) => v },
 }))
 
 vi.mock('@/lib/shared/utils', () => ({

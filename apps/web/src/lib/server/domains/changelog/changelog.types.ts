@@ -46,10 +46,31 @@ export interface UpdateChangelogInput {
 export interface ListChangelogParams {
   /** Filter by status */
   status?: 'draft' | 'scheduled' | 'published' | 'all'
+  /** Filter to a single board */
+  boardId?: ChangelogBoardId
   /** Cursor-based pagination */
   cursor?: string
   /** Number of items to return */
   limit?: number
+}
+
+/**
+ * Input for creating a changelog board
+ */
+export interface CreateChangelogBoardInput {
+  name: string
+  slug: string
+  description?: string
+  isPublic?: boolean
+}
+
+/**
+ * Input for updating a changelog board
+ */
+export interface UpdateChangelogBoardInput {
+  name?: string
+  description?: string
+  isPublic?: boolean
 }
 
 // ============================================================================
