@@ -233,3 +233,51 @@ test.describe('allowAnonymous master switch (fail-closed ceiling)', () => {
     }
   })
 })
+
+// Open a board's seeded post detail and return its vote button (data-testid on
+// the detail sidebar). This describe runs last so any anon session a vote mints
+// can't leak into the other tests, and the workspace switch is back ON by now.
+async function gotoPost(page: Page, board: { slug: string; postId: string }) {
+  await page.goto(`/b/${board.slug}/posts/${board.postId}`)
+  await page.waitForLoadState('networkidle')
+}
+const voteButton = (page: Page) => page.getByTestId('vote-button').first()
+
+test.describe('vote tier — vote affordance + gating', () => {
+  test('anonymous on a vote:authenticated board → vote raises sign-in (no vote recorded)', async () => {
+    await gotoPost(anon, fx.boards.public)
+    const btn = voteButton(anon)
+    await expect(btn).toBeVisible()
+    await btn.click()
+    // vote requires sign-in, so the auth dialog is raised instead of voting.
+    await expect(anon.getByRole('dialog')).toBeVisible()
+    await expect(anon.getByText(/sign in to vote/i)).toBeVisible()
+    await anon.keyboard.press('Escape')
+  })
+
+  test('authenticated user CAN vote on a vote:authenticated board', async () => {
+    await gotoPost(user, fx.boards.public)
+    const btn = voteButton(user)
+    await expect(btn).toBeVisible()
+    await expect(btn).not.toHaveAttribute('aria-disabled', 'true')
+    const before = (await btn.getAttribute('aria-pressed')) === 'true'
+    await btn.click()
+    await expect(btn).toHaveAttribute('aria-pressed', String(!before)) // toggled = vote accepted
+    await btn.click() // restore the count
+    await expect(btn).toHaveAttribute('aria-pressed', String(before))
+  })
+
+  test('anonymous CAN vote on an all-anonymous board (vote:anonymous)', async () => {
+    await gotoPost(anon, fx.boards.allanon)
+    const btn = voteButton(anon)
+    await expect(btn).toBeVisible()
+    await expect(btn).not.toHaveAttribute('aria-disabled', 'true')
+    const before = (await btn.getAttribute('aria-pressed')) === 'true'
+    await btn.click()
+    // No sign-in dialog: an anon session is minted silently and the vote lands.
+    await expect(anon.getByRole('dialog')).toHaveCount(0)
+    await expect(btn).toHaveAttribute('aria-pressed', String(!before))
+    await btn.click() // restore
+    await expect(btn).toHaveAttribute('aria-pressed', String(before))
+  })
+})
