@@ -1,11 +1,13 @@
 import { useIntl } from 'react-intl'
-import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
+import { ChevronLeftIcon, ChevronRightIcon, LockClosedIcon } from '@heroicons/react/24/outline'
 import { usePillsScroll } from '@/lib/client/hooks/use-pills-scroll'
 import { cn } from '@/lib/shared/utils'
 
 interface RoadmapTabItem {
   id: string
   name: string
+  /** Private roadmaps (isPublic === false) are only listed for team/staff. */
+  isPublic?: boolean
 }
 
 interface RoadmapTabsProps {
@@ -40,12 +42,21 @@ export function RoadmapTabs({ roadmaps, selectedId, onSelect }: RoadmapTabsProps
               aria-selected={isActive}
               onClick={() => onSelect(roadmap.id)}
               className={cn(
-                'rounded-full text-sm px-3 py-1 whitespace-nowrap transition-colors shrink-0',
+                'rounded-full text-sm px-3 py-1 whitespace-nowrap transition-colors shrink-0 inline-flex items-center gap-1',
                 isActive
                   ? 'bg-foreground/10 text-foreground font-medium'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
               )}
             >
+              {roadmap.isPublic === false && (
+                <LockClosedIcon
+                  className="w-3 h-3 shrink-0"
+                  aria-label={intl.formatMessage({
+                    id: 'portal.roadmap.tabs.private',
+                    defaultMessage: 'Private roadmap',
+                  })}
+                />
+              )}
               {roadmap.name}
             </button>
           )

@@ -17,7 +17,7 @@ import {
 } from '@/lib/server/db'
 import { type RoadmapId, type PostId } from '@quackback/ids'
 import { NotFoundError } from '@/lib/shared/errors'
-import { ANONYMOUS_ACTOR, boardViewFilter, type Actor } from '@/lib/server/policy'
+import { ANONYMOUS_ACTOR, boardViewFilter, isTeamActor, type Actor } from '@/lib/server/policy'
 import type { SQL } from 'drizzle-orm'
 import type { RoadmapPostsListResult, RoadmapPostsQueryOptions } from './roadmap.types'
 
@@ -162,7 +162,10 @@ export async function getRoadmapPosts(
  * Get public roadmap posts.
  *
  * Authorization layers:
- *   - Only `isPublic` roadmaps are reachable here.
+ *   - Private (`isPublic=false`) roadmaps are reachable only by team
+ *     members (admin/member); anonymous and portal users get a 404, so a
+ *     private roadmap is invisible to the public both in the switcher list
+ *     and via a guessed/linked ID.
  *   - Only `moderationState='published'` posts surface (admins on the
  *     team-facing getRoadmapPosts see pending; this is the public path).
  *   - `boardViewFilter(actor)` filters posts whose linked board the
@@ -175,12 +178,13 @@ export async function getPublicRoadmapPosts(
   options: RoadmapPostsQueryOptions,
   actor: Actor = ANONYMOUS_ACTOR
 ): Promise<RoadmapPostsListResult> {
-  // Verify roadmap exists and is public
+  // Verify roadmap exists. Private roadmaps are team/staff only — a
+  // non-team actor gets the same 404 as a missing roadmap.
   const roadmap = await db.query.roadmaps.findFirst({ where: eq(roadmaps.id, roadmapId) })
   if (!roadmap) {
     throw new NotFoundError('ROADMAP_NOT_FOUND', `Roadmap with ID ${roadmapId} not found`)
   }
-  if (!roadmap.isPublic) {
+  if (!roadmap.isPublic && !isTeamActor(actor)) {
     throw new NotFoundError('ROADMAP_NOT_FOUND', `Roadmap with ID ${roadmapId} not found`)
   }
 

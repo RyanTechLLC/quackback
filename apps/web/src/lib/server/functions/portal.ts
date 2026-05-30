@@ -35,7 +35,7 @@ import { getPostMergeInfo, getMergedPosts } from '@/lib/server/domains/posts/pos
 import { listPublicStatuses } from '@/lib/server/domains/statuses/status.service'
 import { listPublicTags } from '@/lib/server/domains/tags/tag.service'
 import { getSubscriptionStatus } from '@/lib/server/domains/subscriptions/subscription.service'
-import { listPublicRoadmaps } from '@/lib/server/domains/roadmaps/roadmap.service'
+import { listPublicRoadmaps, listRoadmaps } from '@/lib/server/domains/roadmaps/roadmap.service'
 import { getPublicRoadmapPosts } from '@/lib/server/domains/roadmaps/roadmap.query'
 import { resolvePortalAccessForRequest } from './portal-access'
 
@@ -452,7 +452,11 @@ export const fetchPublicRoadmaps = createServerFn({ method: 'GET' }).handler(asy
       return []
     }
 
-    const roadmaps = await listPublicRoadmaps()
+    // Team/staff see private roadmaps too (so they can toggle to them on the
+    // portal); everyone else sees only public ones.
+    const auth = hasAuthCredentials() ? await getOptionalAuth() : null
+    const roadmaps =
+      auth && isTeamMember(auth.principal.role) ? await listRoadmaps() : await listPublicRoadmaps()
     return roadmaps.map((r) => ({
       id: r.id,
       name: r.name,
