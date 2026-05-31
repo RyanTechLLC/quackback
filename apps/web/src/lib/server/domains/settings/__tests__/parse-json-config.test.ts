@@ -3,6 +3,7 @@ import { parseJsonConfig } from '../settings.helpers'
 import {
   DEFAULT_PORTAL_CONFIG,
   DEFAULT_WIDGET_CONFIG,
+  workspaceAllowsAnonymous,
   type PublicPortalConfig,
 } from '../settings.types'
 
@@ -109,5 +110,38 @@ describe('parseJsonConfig', () => {
     // Count of enabled methods must be >= 2 so email isn't the "last" one
     const enabledCount = Object.values(result.oauth).filter(Boolean).length
     expect(enabledCount).toBeGreaterThanOrEqual(2)
+  })
+})
+
+describe('workspaceAllowsAnonymous', () => {
+  it('allows anonymous only when the flag is explicitly true (string config)', () => {
+    expect(workspaceAllowsAnonymous(JSON.stringify({ features: { allowAnonymous: true } }))).toBe(
+      true
+    )
+  })
+
+  it('allows anonymous when the flag is explicitly true (object config)', () => {
+    expect(workspaceAllowsAnonymous({ features: { allowAnonymous: true } })).toBe(true)
+  })
+
+  it('fails closed when the flag is false, missing, or the config is null/undefined', () => {
+    expect(workspaceAllowsAnonymous(JSON.stringify({ features: { allowAnonymous: false } }))).toBe(
+      false
+    )
+    expect(workspaceAllowsAnonymous(JSON.stringify({ features: {} }))).toBe(false)
+    expect(workspaceAllowsAnonymous(null)).toBe(false)
+    expect(workspaceAllowsAnonymous(undefined)).toBe(false)
+  })
+
+  it('fails closed on an empty string (a live portal_config state, see migration 0084) instead of throwing', () => {
+    // Pre-0084 / restored-backup rows can carry '' rather than NULL; the gate
+    // must deny, not 500. Every other portal-config parse site try/catches.
+    expect(() => workspaceAllowsAnonymous('')).not.toThrow()
+    expect(workspaceAllowsAnonymous('')).toBe(false)
+  })
+
+  it('fails closed on malformed JSON instead of throwing', () => {
+    expect(() => workspaceAllowsAnonymous('{ not valid json')).not.toThrow()
+    expect(workspaceAllowsAnonymous('{ not valid json')).toBe(false)
   })
 })

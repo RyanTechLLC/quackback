@@ -297,7 +297,17 @@ export const DEFAULT_PORTAL_CONFIG: PortalConfig = {
 export function workspaceAllowsAnonymous(
   portalConfig: string | Record<string, unknown> | null | undefined
 ): boolean {
-  const parsed = typeof portalConfig === 'string' ? JSON.parse(portalConfig) : portalConfig
+  let parsed: unknown = portalConfig
+  if (typeof portalConfig === 'string') {
+    // A corrupt / empty-string portal_config (a live pre-0084 state — see the
+    // migration) must DENY, not throw a 500. Mirrors parseJsonOrNull; the gate
+    // stays fail-closed on unparseable config.
+    try {
+      parsed = JSON.parse(portalConfig)
+    } catch {
+      return false
+    }
+  }
   return (
     (parsed as { features?: { allowAnonymous?: boolean } } | null | undefined)?.features
       ?.allowAnonymous === true
