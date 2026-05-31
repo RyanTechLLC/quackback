@@ -40,6 +40,11 @@ export const notificationTypeConfigs: Record<NotificationType, NotificationTypeC
     iconClass: 'text-teal-500',
     bgClass: 'bg-teal-500/10',
   },
+  chat_mention: {
+    icon: ChatBubbleLeftRightIcon,
+    iconClass: 'text-teal-500',
+    bgClass: 'bg-teal-500/10',
+  },
 }
 
 export const defaultNotificationTypeConfig: NotificationTypeConfig = {

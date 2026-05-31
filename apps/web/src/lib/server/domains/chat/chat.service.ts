@@ -34,9 +34,9 @@ import {
   MAX_CHAT_ATTACHMENTS,
   type ChatSenderType,
 } from '@/lib/shared/chat/types'
-import { publishChatEvent } from '@/lib/server/realtime/chat-channels'
+import { publishChatEvent, publishAgentChatEvent } from '@/lib/server/realtime/chat-channels'
 import { truncate } from '@/lib/shared/utils/string'
-import { notifyVisitorMessage, notifyAgentReply } from './chat.notify'
+import { notifyVisitorMessage, notifyAgentReply, notifyNoteMentions } from './chat.notify'
 import { conversationToDTO, toMessageDTO, authorFromInput } from './chat.query'
 import type {
   ChatAuthorInput,
@@ -309,6 +309,60 @@ export async function sendAgentMessage(
     agentName: agent.displayName ?? 'Support',
   })
 
+  return { conversation: conversationDTO, message: messageDTO }
+}
+
+/**
+ * Add an agent-only internal note. Never reaches the visitor: stored with
+ * isInternal=true, published only to the agent inbox channel, excluded from
+ * visitor read paths + unread counts, and it does not bump the visitor-facing
+ * last-message preview. @mentions notify teammates.
+ */
+export async function addAgentNote(
+  conversationId: ConversationId,
+  rawContent: string,
+  agent: ChatAuthorInput,
+  actor: Actor
+): Promise<SendAgentMessageResult> {
+  const decision = canActAsAgent(actor)
+  if (!decision.allowed) throw new ForbiddenError('FORBIDDEN', decision.reason)
+  const content = validateContent(rawContent)
+
+  const conversation = await loadConversationOr404(conversationId)
+  const [message] = await db
+    .insert(chatMessages)
+    .values({
+      conversationId,
+      principalId: agent.principalId,
+      senderType: 'agent',
+      isInternal: true,
+      content,
+    })
+    .returning()
+  // Touch updatedAt only — internal notes don't change the visitor-facing
+  // last-message preview/time.
+  await db
+    .update(conversations)
+    .set({ updatedAt: message.createdAt })
+    .where(eq(conversations.id, conversationId))
+
+  const messageDTO = toMessageDTO(message, authorFromInput(agent))
+  // Agent inbox only — the visitor's conversation channel never receives it.
+  publishAgentChatEvent({ kind: 'message', conversationId, message: messageDTO })
+
+  void notifyNoteMentions({
+    conversationId,
+    content,
+    authorPrincipalId: agent.principalId,
+    authorName: agent.displayName ?? 'A teammate',
+  })
+
+  // The conversation isn't materially changed by a note; reuse the row we
+  // already loaded (with the bumped updatedAt) instead of re-querying.
+  const conversationDTO = await conversationToDTO(
+    { ...conversation, updatedAt: message.createdAt },
+    'agent'
+  )
   return { conversation: conversationDTO, message: messageDTO }
 }
 

@@ -67,6 +67,11 @@ const agentSendSchema = z.object({
   attachments: z.array(attachmentSchema).max(MAX_CHAT_ATTACHMENTS).optional(),
 })
 
+const agentNoteSchema = z.object({
+  conversationId: z.string(),
+  content: z.string().min(1).max(MAX_CHAT_MESSAGE_LENGTH),
+})
+
 const setStatusSchema = z.object({
   conversationId: z.string(),
   status: z.enum(['open', 'snoozed', 'closed']),
@@ -177,7 +182,11 @@ export const listChatMessagesFn = createServerFn({ method: 'GET' })
       const { assertConversationViewable } = await import('@/lib/server/domains/chat/chat.service')
       const { listMessages } = await import('@/lib/server/domains/chat/chat.query')
       await assertConversationViewable(data.conversationId as ConversationId, actor)
-      return await listMessages(data.conversationId as ConversationId, { before: data.before })
+      // Agents keep seeing internal notes when paging older messages; visitors never do.
+      return await listMessages(data.conversationId as ConversationId, {
+        before: data.before,
+        includeInternal: isTeamMember(ctx.principal.role),
+      })
     } catch (error) {
       console.error('[fn:chat] listChatMessagesFn failed:', error)
       throw error
@@ -313,7 +322,8 @@ export const getConversationFn = createServerFn({ method: 'GET' })
       )
       const [dto, page] = await Promise.all([
         conversationToDTO(conversation, 'agent'),
-        listMessages(conversation.id, { before: data.before }),
+        // Agents see internal notes inline.
+        listMessages(conversation.id, { before: data.before, includeInternal: true }),
       ])
       return { conversation: dto, messages: page.messages, hasMore: page.hasMore }
     } catch (error) {
@@ -343,6 +353,30 @@ export const sendAgentMessageFn = createServerFn({ method: 'POST' })
       )
     } catch (error) {
       console.error('[fn:chat] sendAgentMessageFn failed:', error)
+      throw error
+    }
+  })
+
+/** Add an agent-only internal note (never sent to the visitor). */
+export const addChatNoteFn = createServerFn({ method: 'POST' })
+  .inputValidator(agentNoteSchema)
+  .handler(async ({ data }) => {
+    try {
+      const ctx = await requireAuth({ roles: ['admin', 'member'] })
+      const actor = await policyActorFromAuth(ctx)
+      const { addAgentNote } = await import('@/lib/server/domains/chat/chat.service')
+      return await addAgentNote(
+        data.conversationId as ConversationId,
+        data.content,
+        {
+          principalId: ctx.principal.id,
+          displayName: ctx.user.name,
+          avatarUrl: ctx.user.image,
+        },
+        actor
+      )
+    } catch (error) {
+      console.error('[fn:chat] addChatNoteFn failed:', error)
       throw error
     }
   })

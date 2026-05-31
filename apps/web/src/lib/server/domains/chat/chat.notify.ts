@@ -10,7 +10,7 @@
  */
 import { db, eq, inArray, principal, user } from '@/lib/server/db'
 import type { Conversation } from '@/lib/server/db'
-import type { PrincipalId } from '@quackback/ids'
+import type { PrincipalId, ConversationId } from '@quackback/ids'
 import { isAnyAgentOnline, isPrincipalOnline } from '@/lib/server/realtime/presence'
 import { createNotificationsBatch } from '@/lib/server/domains/notifications/notification.service'
 import { buildHookContext } from '@/lib/server/events/hook-context'
@@ -76,6 +76,49 @@ export async function notifyVisitorMessage(opts: {
     }
   } catch (err) {
     console.warn('[chat:notify] notifyVisitorMessage failed:', (err as Error).message)
+  }
+}
+
+/**
+ * Notify mentioned teammates of an internal note. Mentions are matched
+ * deterministically against the email local-part (`@jane.doe` → jane.doe@…),
+ * so a non-matching `@token` is just plain text and never mis-notifies.
+ */
+export async function notifyNoteMentions(opts: {
+  conversationId: ConversationId
+  content: string
+  authorPrincipalId: PrincipalId
+  authorName: string
+}): Promise<void> {
+  try {
+    const tokens = [...opts.content.matchAll(/@([\w.+-]{2,})/g)].map((m) => m[1].toLowerCase())
+    if (tokens.length === 0) return
+    const wanted = new Set(tokens)
+
+    const team = await db
+      .select({ principalId: principal.id, email: user.email })
+      .from(principal)
+      .leftJoin(user, eq(principal.userId, user.id))
+      .where(inArray(principal.role, ['admin', 'member']))
+
+    const recipients = team.filter((t) => {
+      if (!t.email || t.principalId === opts.authorPrincipalId) return false
+      const localPart = t.email.split('@')[0]?.toLowerCase()
+      return localPart ? wanted.has(localPart) : false
+    })
+    if (recipients.length === 0) return
+
+    await createNotificationsBatch(
+      recipients.map((r) => ({
+        principalId: r.principalId,
+        type: 'chat_mention' as const,
+        title: `${opts.authorName} mentioned you in a chat`,
+        body: previewOf(opts.content),
+        metadata: { conversationId: opts.conversationId },
+      }))
+    )
+  } catch (err) {
+    console.warn('[chat:notify] notifyNoteMentions failed:', (err as Error).message)
   }
 }
 

@@ -12,6 +12,7 @@ import {
   EllipsisVerticalIcon,
   TrashIcon,
   ChatBubbleBottomCenterTextIcon,
+  PencilSquareIcon,
 } from '@heroicons/react/24/outline'
 import { toast } from 'sonner'
 import type { ConversationId, ChatMessageId } from '@quackback/ids'
@@ -19,6 +20,7 @@ import {
   listConversationsFn,
   getConversationFn,
   sendAgentMessageFn,
+  addChatNoteFn,
   setConversationStatusFn,
   assignConversationFn,
   markChatReadFn,
@@ -267,6 +269,8 @@ function ChatThread({
   const queryClient = useQueryClient()
   const threadKey = ['admin', 'chat', 'thread', conversationId] as const
   const [reply, setReply] = useState('')
+  // Composer mode: a public reply to the visitor, or an internal team note.
+  const [noteMode, setNoteMode] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const sendTyping = useCallback(() => {
@@ -318,6 +322,18 @@ function ChatThread({
       .catch(() => {})
   }, [conversationId, lastMessageId, isLoading, onChanged])
 
+  // Merge a freshly-sent message into the thread cache (dedup by id).
+  const appendToThread = (res: { conversation: ConversationDTO; message: ChatMessageDTO }) => {
+    queryClient.setQueryData(
+      threadKey,
+      (prev: { conversation: ConversationDTO; messages: ChatMessageDTO[] } | undefined) =>
+        prev && !prev.messages.some((m) => m.id === res.message.id)
+          ? { ...prev, conversation: res.conversation, messages: [...prev.messages, res.message] }
+          : prev
+    )
+    onChanged()
+  }
+
   const sendMutation = useMutation({
     mutationFn: (vars: { content: string; attachments?: ChatAttachment[] }) =>
       sendAgentMessageFn({
@@ -325,16 +341,15 @@ function ChatThread({
       }),
     onSuccess: (res) => {
       clearAttachments()
-      queryClient.setQueryData(
-        threadKey,
-        (prev: { conversation: ConversationDTO; messages: ChatMessageDTO[] } | undefined) =>
-          prev && !prev.messages.some((m) => m.id === res.message.id)
-            ? { ...prev, conversation: res.conversation, messages: [...prev.messages, res.message] }
-            : prev
-      )
-      onChanged()
+      appendToThread(res)
     },
     onError: () => toast.error('Failed to send message'),
+  })
+
+  const noteMutation = useMutation({
+    mutationFn: (content: string) => addChatNoteFn({ data: { conversationId, content } }),
+    onSuccess: appendToThread,
+    onError: () => toast.error('Failed to add note'),
   })
 
   const statusMutation = useMutation({
@@ -399,13 +414,20 @@ function ChatThread({
 
   const onSend = useCallback(() => {
     const text = reply.trim()
+    if (noteMode) {
+      // Notes are text-only; no attachments.
+      if (!text || noteMutation.isPending) return
+      setReply('')
+      noteMutation.mutate(text)
+      return
+    }
     if ((!text && pendingAttachments.length === 0) || sendMutation.isPending || uploading) return
     setReply('')
     sendMutation.mutate({
       content: text,
       attachments: pendingAttachments.length > 0 ? pendingAttachments : undefined,
     })
-  }, [reply, pendingAttachments, uploading, sendMutation])
+  }, [reply, noteMode, noteMutation, pendingAttachments, uploading, sendMutation])
 
   if (isLoading) {
     return (
@@ -515,7 +537,32 @@ function ChatThread({
 
         {/* Composer */}
         <div className="border-t border-border/50 p-3">
-          {pendingAttachments.length > 0 && (
+          {/* Reply vs internal-note mode */}
+          <div className="mb-2 flex gap-1">
+            {(
+              [
+                { mode: false, label: 'Reply' },
+                { mode: true, label: 'Note' },
+              ] as const
+            ).map(({ mode, label }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setNoteMode(mode)}
+                className={cn(
+                  'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                  noteMode === mode
+                    ? mode
+                      ? 'bg-amber-400/20 text-amber-700 dark:text-amber-300'
+                      : 'bg-muted text-foreground'
+                    : 'text-muted-foreground hover:bg-muted/60'
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {!noteMode && pendingAttachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 px-1 pb-2">
               {pendingAttachments.map((a, i) => (
                 <div
@@ -536,7 +583,14 @@ function ChatThread({
               ))}
             </div>
           )}
-          <div className="flex items-end gap-2 rounded-lg border border-border bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-primary/20">
+          <div
+            className={cn(
+              'flex items-end gap-2 rounded-lg border px-3 py-2 focus-within:ring-2',
+              noteMode
+                ? 'border-amber-400/50 bg-amber-400/5 focus-within:ring-amber-400/20'
+                : 'border-border bg-background focus-within:ring-primary/20'
+            )}
+          >
             <input
               ref={fileInputRef}
               type="file"
@@ -548,15 +602,17 @@ function ChatThread({
                 e.target.value = ''
               }}
             />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-              aria-label="Attach image"
-            >
-              <PaperClipIcon className="h-4 w-4" />
-            </button>
+            {!noteMode && (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                aria-label="Attach image"
+              >
+                <PaperClipIcon className="h-4 w-4" />
+              </button>
+            )}
             {cannedReplies.length > 0 && (
               <Popover>
                 <PopoverTrigger asChild>
@@ -594,7 +650,8 @@ function ChatThread({
               value={reply}
               onChange={(e) => {
                 setReply(e.target.value)
-                onLocalInput()
+                // Typing indicators are for visitor-facing replies only.
+                if (!noteMode) onLocalInput()
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -603,21 +660,30 @@ function ChatThread({
                 }
               }}
               rows={1}
-              placeholder="Type your reply…"
+              placeholder={noteMode ? 'Add an internal note for your team…' : 'Type your reply…'}
               className="flex-1 resize-none bg-transparent text-sm outline-none max-h-32 py-1"
             />
             <button
               type="button"
               onClick={onSend}
               disabled={
-                (!reply.trim() && pendingAttachments.length === 0) ||
-                sendMutation.isPending ||
-                uploading
+                noteMode
+                  ? !reply.trim() || noteMutation.isPending
+                  : (!reply.trim() && pendingAttachments.length === 0) ||
+                    sendMutation.isPending ||
+                    uploading
               }
-              className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground disabled:opacity-40 transition-opacity"
-              aria-label="Send reply"
+              className={cn(
+                'flex size-8 shrink-0 items-center justify-center rounded-md text-primary-foreground disabled:opacity-40 transition-opacity',
+                noteMode ? 'bg-amber-500 text-white' : 'bg-primary'
+              )}
+              aria-label={noteMode ? 'Add note' : 'Send reply'}
             >
-              <PaperAirplaneIcon className="h-4 w-4" />
+              {noteMode ? (
+                <PencilSquareIcon className="h-4 w-4" />
+              ) : (
+                <PaperAirplaneIcon className="h-4 w-4" />
+              )}
             </button>
           </div>
         </div>
@@ -629,6 +695,34 @@ function ChatThread({
 }
 
 function AdminBubble({ message, onDelete }: { message: ChatMessageDTO; onDelete: () => void }) {
+  // Internal notes are agent-only and never sent to the visitor — render them
+  // as a distinct full-width note rather than a chat bubble.
+  if (message.isInternal) {
+    return (
+      <div className="group relative rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm">
+        <div className="mb-0.5 flex items-center gap-1.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+          <PencilSquareIcon className="h-3 w-3" />
+          {message.author.displayName ?? 'Teammate'} · Internal note
+        </div>
+        <p className="whitespace-pre-wrap break-words text-foreground/90">{message.content}</p>
+        <span className="mt-0.5 block text-[10px] text-muted-foreground/50">
+          {new Date(message.createdAt).toLocaleTimeString([], {
+            hour: 'numeric',
+            minute: '2-digit',
+          })}
+        </span>
+        <button
+          type="button"
+          onClick={onDelete}
+          className="absolute right-1.5 top-1.5 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-amber-400/20 group-hover:opacity-100"
+          aria-label="Delete note"
+        >
+          <TrashIcon className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    )
+  }
+
   // The agent is "me": agent messages right-aligned, visitor messages left.
   const isAgent = message.senderType === 'agent'
   return (

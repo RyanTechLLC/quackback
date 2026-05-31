@@ -24,3 +24,11 @@ export function publishChatEvent(conversationId: ConversationId, event: ChatStre
   publish(conversationChannel(conversationId), event)
   publish(CHAT_INBOX_CHANNEL, event)
 }
+
+/**
+ * Publish an agent-only event to the inbox channel ONLY (never the
+ * conversation channel the visitor subscribes to) — used for internal notes.
+ */
+export function publishAgentChatEvent(event: ChatStreamEvent): void {
+  publish(CHAT_INBOX_CHANNEL, event)
+}

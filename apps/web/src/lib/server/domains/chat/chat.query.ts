@@ -80,6 +80,7 @@ export function toMessageDTO(message: ChatMessage, author: ChatAuthorDTO): ChatM
     createdAt: message.createdAt.toISOString(),
     author,
     attachments: message.attachments ?? [],
+    isInternal: message.isInternal,
   }
 }
 
@@ -117,6 +118,8 @@ async function unreadCountFor(conversation: Conversation, side: ChatSenderType):
         eq(chatMessages.conversationId, conversation.id),
         eq(chatMessages.senderType, otherSide),
         isNull(chatMessages.deletedAt),
+        // Internal notes never count toward unread (esp. for the visitor side).
+        eq(chatMessages.isInternal, false),
         readAt ? sql`${chatMessages.createdAt} > ${readAt}` : sql`true`
       )
     )
@@ -172,7 +175,7 @@ export interface MessagePage {
  */
 export async function listMessages(
   conversationId: ConversationId,
-  opts?: { before?: string; limit?: number }
+  opts?: { before?: string; limit?: number; includeInternal?: boolean }
 ): Promise<MessagePage> {
   const limit = Math.min(opts?.limit ?? MESSAGE_PAGE_SIZE, 100)
 
@@ -203,6 +206,8 @@ export async function listMessages(
       and(
         eq(chatMessages.conversationId, conversationId),
         isNull(chatMessages.deletedAt),
+        // Visitors never see internal notes; agents pass includeInternal.
+        opts?.includeInternal ? undefined : eq(chatMessages.isInternal, false),
         cursor
           ? or(
               lt(chatMessages.createdAt, cursor.createdAt),

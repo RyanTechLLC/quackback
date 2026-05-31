@@ -32,6 +32,8 @@ export interface ChatMessageDTO {
   createdAt: string
   author: ChatAuthorDTO
   attachments: ChatAttachment[]
+  /** Agent-only internal note — only ever present on agent-facing payloads. */
+  isInternal: boolean
 }
 
 /** A conversation row as surfaced to clients (inbox list + thread header). */

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, index, jsonb, integer } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, index, jsonb, integer, boolean } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { typeIdWithDefault, typeIdColumn, typeIdColumnNullable } from '@quackback/ids/drizzle'
 import { principal } from './auth'
@@ -70,6 +70,8 @@ export const chatMessages = pgTable(
     // principal's current role (a team member could also be a visitor).
     senderType: text('sender_type', { enum: CHAT_SENDER_TYPES }).notNull(),
     content: text('content').notNull(),
+    // Agent-only internal note — never sent to or visible to the visitor.
+    isInternal: boolean('is_internal').notNull().default(false),
     // Image/file attachments (client-safe refs); null/empty for text-only messages.
     attachments: jsonb('attachments').$type<ChatAttachment[]>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
