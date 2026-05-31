@@ -14,6 +14,13 @@ vi.mock('@/lib/server/realtime/chat-channels', () => ({
   publishChatEvent: vi.fn(),
 }))
 
+// config getters validate the full env (absent in tests); provide just what the
+// attachment URL check reads.
+vi.mock('@/lib/server/config', () => ({
+  config: { s3PublicUrl: undefined, baseUrl: 'http://localhost:3000' },
+  getBaseUrl: () => 'http://localhost:3000',
+}))
+
 vi.mock('../chat.query', () => ({
   // Return shapes good enough for the service to map results; the service does
   // not branch on their contents in these tests.
@@ -156,5 +163,49 @@ describe('sendVisitorMessage first-message conversation creation', () => {
       principalId: visitor,
       content: 'Hello there',
     })
+  })
+})
+
+describe('sendVisitorMessage attachments', () => {
+  it('allows an attachment-only message (empty content)', async () => {
+    const result = await sendVisitorMessage(
+      {
+        content: '',
+        attachments: [
+          {
+            url: '/api/storage/chat-images/x.png',
+            name: 'x.png',
+            contentType: 'image/png',
+            size: 1234,
+          },
+        ],
+      },
+      { principalId: visitor },
+      visitorActor
+    )
+    expect(result.created).toBe(true)
+    expect(insertedMessages).toHaveLength(1)
+    expect((insertedMessages[0].attachments as unknown[]) ?? []).toHaveLength(1)
+  })
+
+  it('rejects an attachment URL that is not from our storage', async () => {
+    await expect(
+      sendVisitorMessage(
+        {
+          content: 'hi',
+          attachments: [
+            {
+              url: 'https://evil.example.com/x.png',
+              name: 'x.png',
+              contentType: 'image/png',
+              size: 10,
+            },
+          ],
+        },
+        { principalId: visitor },
+        visitorActor
+      )
+    ).rejects.toBeInstanceOf(ValidationError)
+    expect(insertedMessages).toHaveLength(0)
   })
 })

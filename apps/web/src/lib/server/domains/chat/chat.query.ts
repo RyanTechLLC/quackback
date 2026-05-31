@@ -79,6 +79,7 @@ export function toMessageDTO(message: ChatMessage, author: ChatAuthorDTO): ChatM
     content: message.content,
     createdAt: message.createdAt.toISOString(),
     author,
+    attachments: message.attachments ?? [],
   }
 }
 

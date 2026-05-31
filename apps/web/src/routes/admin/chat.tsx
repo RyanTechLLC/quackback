@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChatBubbleLeftRightIcon,
   PaperAirplaneIcon,
+  PaperClipIcon,
+  XMarkIcon,
   CheckCircleIcon,
   ArrowUturnLeftIcon,
 } from '@heroicons/react/24/outline'
@@ -18,10 +20,13 @@ import {
   markChatReadFn,
   sendChatTypingFn,
 } from '@/lib/server/functions/chat'
-import type { ChatMessageDTO, ConversationDTO } from '@/lib/shared/chat/types'
+import type { ChatAttachment, ChatMessageDTO, ConversationDTO } from '@/lib/shared/chat/types'
 import { useChatStream } from '@/lib/client/hooks/use-chat-stream'
 import { useChatTyping } from '@/lib/client/hooks/use-chat-typing'
+import { useImageUpload } from '@/lib/client/hooks/use-image-upload'
+import { useChatComposerAttachments } from '@/lib/client/hooks/use-chat-composer-attachments'
 import { TypingDots } from '@/components/shared/typing-dots'
+import { ChatAttachmentList } from '@/components/shared/chat-attachments'
 import { Avatar } from '@/components/ui/avatar'
 import { Spinner } from '@/components/shared/spinner'
 import { EmptyState } from '@/components/shared/empty-state'
@@ -232,6 +237,16 @@ function ChatThread({
   }, [conversationId])
   const { onLocalInput } = useChatTyping(sendTyping)
 
+  const { upload } = useImageUpload({ endpoint: '/api/upload/image', prefix: 'chat-images' })
+  const {
+    pending: pendingAttachments,
+    addFiles,
+    remove: removeAttachment,
+    clear: clearAttachments,
+    uploading,
+  } = useChatComposerAttachments(upload)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   const { data, isLoading } = useQuery({
     queryKey: threadKey,
     queryFn: () => getConversationFn({ data: { conversationId } }),
@@ -265,8 +280,12 @@ function ChatThread({
   }, [conversationId, messages, isLoading, onChanged])
 
   const sendMutation = useMutation({
-    mutationFn: (content: string) => sendAgentMessageFn({ data: { conversationId, content } }),
+    mutationFn: (vars: { content: string; attachments?: ChatAttachment[] }) =>
+      sendAgentMessageFn({
+        data: { conversationId, content: vars.content, attachments: vars.attachments },
+      }),
     onSuccess: (res) => {
+      clearAttachments()
       queryClient.setQueryData(
         threadKey,
         (prev: { conversation: ConversationDTO; messages: ChatMessageDTO[] } | undefined) =>
@@ -300,10 +319,13 @@ function ChatThread({
 
   const onSend = useCallback(() => {
     const text = reply.trim()
-    if (!text || sendMutation.isPending) return
+    if ((!text && pendingAttachments.length === 0) || sendMutation.isPending || uploading) return
     setReply('')
-    sendMutation.mutate(text)
-  }, [reply, sendMutation])
+    sendMutation.mutate({
+      content: text,
+      attachments: pendingAttachments.length > 0 ? pendingAttachments : undefined,
+    })
+  }, [reply, pendingAttachments, uploading, sendMutation])
 
   if (isLoading) {
     return (
@@ -387,7 +409,48 @@ function ChatThread({
 
       {/* Composer */}
       <div className="border-t border-border/50 p-3">
+        {pendingAttachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-1 pb-2">
+            {pendingAttachments.map((a, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-1 rounded-md border border-border/50 bg-muted/30 px-1.5 py-1 text-[11px]"
+              >
+                <PaperClipIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
+                <span className="max-w-[140px] truncate">{a.name || 'file'}</span>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(i)}
+                  className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label="Remove attachment"
+                >
+                  <XMarkIcon className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="flex items-end gap-2 rounded-lg border border-border bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-primary/20">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) void addFiles(e.target.files)
+              e.target.value = ''
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+            aria-label="Attach image"
+          >
+            <PaperClipIcon className="h-4 w-4" />
+          </button>
           <textarea
             value={reply}
             onChange={(e) => {
@@ -407,7 +470,11 @@ function ChatThread({
           <button
             type="button"
             onClick={onSend}
-            disabled={!reply.trim() || sendMutation.isPending}
+            disabled={
+              (!reply.trim() && pendingAttachments.length === 0) ||
+              sendMutation.isPending ||
+              uploading
+            }
             className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground disabled:opacity-40 transition-opacity"
             aria-label="Send reply"
           >
@@ -432,16 +499,19 @@ function AdminBubble({ message }: { message: ChatMessageDTO }) {
         />
       )}
       <div className={cn('flex max-w-[70%] flex-col', isAgent ? 'items-end' : 'items-start')}>
-        <div
-          className={cn(
-            'rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap break-words',
-            isAgent
-              ? 'bg-primary text-primary-foreground rounded-br-md'
-              : 'bg-muted text-foreground rounded-bl-md'
-          )}
-        >
-          {message.content}
-        </div>
+        {message.content && (
+          <div
+            className={cn(
+              'rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap break-words',
+              isAgent
+                ? 'bg-primary text-primary-foreground rounded-br-md'
+                : 'bg-muted text-foreground rounded-bl-md'
+            )}
+          >
+            {message.content}
+          </div>
+        )}
+        {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} />}
         <span className="mt-0.5 px-1 text-[10px] text-muted-foreground/50">
           {new Date(message.createdAt).toLocaleTimeString([], {
             hour: 'numeric',

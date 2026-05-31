@@ -243,6 +243,14 @@ export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number]
 export const CHAT_SENDER_TYPES = ['visitor', 'agent'] as const
 export type ChatSenderType = (typeof CHAT_SENDER_TYPES)[number]
 
+// A single attachment ref stored on a chat message (chat_messages.attachments).
+export interface ChatAttachment {
+  url: string
+  name: string
+  contentType: string
+  size: number
+}
+
 // Live chat row types
 export type Conversation = InferSelectModel<typeof conversations>
 export type NewConversation = InferInsertModel<typeof conversations>

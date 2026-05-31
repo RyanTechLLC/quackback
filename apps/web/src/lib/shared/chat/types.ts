@@ -15,6 +15,14 @@ export interface ChatAuthorDTO {
   avatarUrl: string | null
 }
 
+/** An image/file attachment ref on a message (URL from the upload pipeline). */
+export interface ChatAttachment {
+  url: string
+  name: string
+  contentType: string
+  size: number
+}
+
 /** A single rendered chat message. `createdAt` is an ISO-8601 string. */
 export interface ChatMessageDTO {
   id: ChatMessageId
@@ -23,6 +31,7 @@ export interface ChatMessageDTO {
   content: string
   createdAt: string
   author: ChatAuthorDTO
+  attachments: ChatAttachment[]
 }
 
 /** A conversation row as surfaced to clients (inbox list + thread header). */
@@ -66,3 +75,4 @@ export type ChatStreamEvent =
 
 /** Hard caps shared by client + server validation. */
 export const MAX_CHAT_MESSAGE_LENGTH = 4000
+export const MAX_CHAT_ATTACHMENTS = 10

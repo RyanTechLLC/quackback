@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FormattedMessage, useIntl } from 'react-intl'
 import { PaperAirplaneIcon } from '@heroicons/react/24/solid'
-import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline'
+import { ChatBubbleLeftRightIcon, PaperClipIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import type { ConversationId } from '@quackback/ids'
 import { Avatar } from '@/components/ui/avatar'
 import { TypingDots } from '@/components/shared/typing-dots'
+import { ChatAttachmentList } from '@/components/shared/chat-attachments'
 import { cn } from '@/lib/shared/utils'
 import { useWidgetAuth } from './widget-auth-provider'
 import { getWidgetAuthHeaders } from '@/lib/client/widget-auth'
 import { useChatStream } from '@/lib/client/hooks/use-chat-stream'
 import { useChatTyping } from '@/lib/client/hooks/use-chat-typing'
-import type { ChatMessageDTO } from '@/lib/shared/chat/types'
+import { useWidgetImageUpload } from '@/lib/client/hooks/use-image-upload'
+import { useChatComposerAttachments } from '@/lib/client/hooks/use-chat-composer-attachments'
+import type { ChatAttachment, ChatMessageDTO } from '@/lib/shared/chat/types'
 import {
   getMyChatFn,
   sendChatMessageFn,
@@ -54,6 +57,16 @@ export function WidgetLiveChat() {
   }, [conversationId])
   const { remoteTyping, onLocalInput, onRemoteTyping, clearRemoteTyping } =
     useChatTyping(sendTyping)
+
+  const { upload } = useWidgetImageUpload()
+  const {
+    pending: pendingAttachments,
+    addFiles,
+    remove: removeAttachment,
+    clear: clearAttachments,
+    uploading,
+  } = useChatComposerAttachments(upload)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Initial load — resumes an existing conversation for the current principal
   // (works without forcing a session: getMyChat returns just the greeting when
@@ -152,9 +165,11 @@ export function WidgetLiveChat() {
 
   const send = useCallback(async () => {
     const text = input.trim()
-    if (!text || sending) return
+    const attachments = pendingAttachments
+    if ((!text && attachments.length === 0) || sending || uploading) return
     setSending(true)
     setInput('')
+    clearAttachments()
 
     const ready = await ensureSession()
     if (!ready) {
@@ -164,7 +179,11 @@ export function WidgetLiveChat() {
     }
     try {
       const res = await sendChatMessageFn({
-        data: { conversationId: conversationId ?? undefined, content: text },
+        data: {
+          conversationId: conversationId ?? undefined,
+          content: text,
+          attachments: attachments.length > 0 ? attachments : undefined,
+        },
         headers: getWidgetAuthHeaders(),
       })
       setConversationId(res.conversation.id as ConversationId)
@@ -174,7 +193,16 @@ export function WidgetLiveChat() {
     } finally {
       setSending(false)
     }
-  }, [input, sending, conversationId, ensureSession, appendMessage])
+  }, [
+    input,
+    pendingAttachments,
+    sending,
+    uploading,
+    conversationId,
+    ensureSession,
+    appendMessage,
+    clearAttachments,
+  ])
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -224,6 +252,7 @@ export function WidgetLiveChat() {
               }
               authorAvatar={m.senderType === 'agent' ? m.author.avatarUrl : null}
               content={m.content}
+              attachments={m.attachments}
               time={formatTime(m.createdAt)}
             />
           ))}
@@ -272,7 +301,52 @@ export function WidgetLiveChat() {
 
       {/* Composer */}
       <div className="border-t border-border/40 p-2 shrink-0">
+        {/* Pending attachment previews */}
+        {pendingAttachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-1 pb-1.5">
+            {pendingAttachments.map((a, i) => (
+              <div
+                key={i}
+                className="group relative flex items-center gap-1 rounded-md border border-border/50 bg-muted/30 px-1.5 py-1 text-[11px]"
+              >
+                <PaperClipIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
+                <span className="max-w-[120px] truncate">{a.name || 'file'}</span>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(i)}
+                  className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label="Remove attachment"
+                >
+                  <XMarkIcon className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="flex items-end gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5 focus-within:ring-2 focus-within:ring-primary/20">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) void addFiles(e.target.files)
+              e.target.value = ''
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="shrink-0 flex items-center justify-center size-7 rounded-md text-muted-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+            aria-label={intl.formatMessage({
+              id: 'widget.chat.attach',
+              defaultMessage: 'Attach image',
+            })}
+          >
+            <PaperClipIcon className="w-4 h-4" />
+          </button>
           <textarea
             value={input}
             onChange={(e) => {
@@ -290,7 +364,7 @@ export function WidgetLiveChat() {
           <button
             type="button"
             onClick={() => void send()}
-            disabled={!input.trim() || sending}
+            disabled={(!input.trim() && pendingAttachments.length === 0) || sending || uploading}
             className="shrink-0 flex items-center justify-center size-7 rounded-md bg-primary text-primary-foreground disabled:opacity-40 transition-opacity"
             aria-label={intl.formatMessage({ id: 'widget.chat.send', defaultMessage: 'Send' })}
           >
@@ -307,10 +381,18 @@ interface ChatBubbleProps {
   content: string
   authorName?: string
   authorAvatar?: string | null
+  attachments?: ChatAttachment[]
   time?: string
 }
 
-function ChatBubble({ side, content, authorName, authorAvatar, time }: ChatBubbleProps) {
+function ChatBubble({
+  side,
+  content,
+  authorName,
+  authorAvatar,
+  attachments,
+  time,
+}: ChatBubbleProps) {
   const isVisitor = side === 'visitor'
   return (
     <div className={cn('flex items-end gap-2', isVisitor ? 'flex-row-reverse' : 'flex-row')}>
@@ -325,16 +407,19 @@ function ChatBubble({ side, content, authorName, authorAvatar, time }: ChatBubbl
         {!isVisitor && authorName && (
           <span className="text-[10px] text-muted-foreground/60 mb-0.5 px-1">{authorName}</span>
         )}
-        <div
-          className={cn(
-            'rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words leading-relaxed',
-            isVisitor
-              ? 'bg-primary text-primary-foreground rounded-br-md'
-              : 'bg-muted text-foreground rounded-bl-md'
-          )}
-        >
-          {content}
-        </div>
+        {content && (
+          <div
+            className={cn(
+              'rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words leading-relaxed',
+              isVisitor
+                ? 'bg-primary text-primary-foreground rounded-br-md'
+                : 'bg-muted text-foreground rounded-bl-md'
+            )}
+          >
+            {content}
+          </div>
+        )}
+        {attachments && attachments.length > 0 && <ChatAttachmentList attachments={attachments} />}
         {time && <span className="text-[10px] text-muted-foreground/50 mt-0.5 px-1">{time}</span>}
       </div>
     </div>

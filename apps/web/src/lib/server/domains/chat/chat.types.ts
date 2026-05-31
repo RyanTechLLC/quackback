@@ -1,5 +1,5 @@
 import type { ConversationId, PrincipalId } from '@quackback/ids'
-import type { ChatMessageDTO, ConversationDTO } from '@/lib/shared/chat/types'
+import type { ChatAttachment, ChatMessageDTO, ConversationDTO } from '@/lib/shared/chat/types'
 
 /** Author identity passed into a send call (resolved from the auth context). */
 export interface ChatAuthorInput {
@@ -14,6 +14,7 @@ export interface ChatAuthorInput {
 export interface SendVisitorMessageInput {
   conversationId?: ConversationId
   content: string
+  attachments?: ChatAttachment[]
 }
 
 export interface SendVisitorMessageResult {

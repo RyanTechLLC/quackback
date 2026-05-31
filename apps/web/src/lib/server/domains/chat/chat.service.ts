@@ -9,8 +9,10 @@
  *   - sendAgentMessage:    a team member replies (senderType 'agent').
  */
 import { db, eq, conversations, chatMessages, type Conversation } from '@/lib/server/db'
+import type { ChatAttachment } from '@/lib/server/db'
 import type { ConversationId, PrincipalId } from '@quackback/ids'
 import { NotFoundError, ValidationError, ForbiddenError } from '@/lib/shared/errors'
+import { config } from '@/lib/server/config'
 import {
   canSendVisitorMessage,
   canStartConversation,
@@ -18,7 +20,11 @@ import {
   canViewConversation,
 } from '@/lib/server/policy/chat'
 import type { Actor } from '@/lib/server/policy/types'
-import { MAX_CHAT_MESSAGE_LENGTH, type ChatSenderType } from '@/lib/shared/chat/types'
+import {
+  MAX_CHAT_MESSAGE_LENGTH,
+  MAX_CHAT_ATTACHMENTS,
+  type ChatSenderType,
+} from '@/lib/shared/chat/types'
 import { publishChatEvent } from '@/lib/server/realtime/chat-channels'
 import { truncate } from '@/lib/shared/utils/string'
 import { notifyVisitorMessage, notifyAgentReply } from './chat.notify'
@@ -31,10 +37,51 @@ import type {
 } from './chat.types'
 
 const PREVIEW_LENGTH = 120
+// Matches the 5 MB cap enforced by the upload endpoints.
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
 
-function validateContent(raw: string): string {
-  const content = raw?.trim()
-  if (!content) throw new ValidationError('VALIDATION_ERROR', 'Message cannot be empty')
+/**
+ * Only accept attachment URLs that came from our own upload pipeline (relative
+ * /api/storage/... or the configured S3 public host) — never an arbitrary URL
+ * a client could inject into the message body.
+ */
+function isTrustedAttachmentUrl(url: string): boolean {
+  if (typeof url !== 'string' || url.length === 0) return false
+  if (config.s3PublicUrl && url.startsWith(config.s3PublicUrl)) return true
+  return url.includes('/api/storage/')
+}
+
+function validateAttachments(attachments?: ChatAttachment[]): ChatAttachment[] {
+  if (!attachments || attachments.length === 0) return []
+  if (attachments.length > MAX_CHAT_ATTACHMENTS) {
+    throw new ValidationError(
+      'VALIDATION_ERROR',
+      `Too many attachments (max ${MAX_CHAT_ATTACHMENTS})`
+    )
+  }
+  return attachments.map((a) => {
+    if (!isTrustedAttachmentUrl(a?.url)) {
+      throw new ValidationError('VALIDATION_ERROR', 'Invalid attachment')
+    }
+    const size = Number(a.size)
+    if (!Number.isFinite(size) || size < 0 || size > MAX_ATTACHMENT_BYTES) {
+      throw new ValidationError('VALIDATION_ERROR', 'Attachment too large')
+    }
+    return {
+      url: a.url,
+      name: String(a.name ?? '').slice(0, 255),
+      contentType: String(a.contentType ?? '').slice(0, 128),
+      size,
+    }
+  })
+}
+
+/** Validate text content; allow empty only when attachments are present. */
+function validateContent(raw: string, hasAttachments = false): string {
+  const content = raw?.trim() ?? ''
+  if (!content && !hasAttachments) {
+    throw new ValidationError('VALIDATION_ERROR', 'Message cannot be empty')
+  }
   if (content.length > MAX_CHAT_MESSAGE_LENGTH) {
     throw new ValidationError(
       'VALIDATION_ERROR',
@@ -44,8 +91,10 @@ function validateContent(raw: string): string {
   return content
 }
 
-function preview(content: string): string {
-  return truncate(content, PREVIEW_LENGTH)
+function preview(content: string, attachments: ChatAttachment[] = []): string {
+  if (content) return truncate(content, PREVIEW_LENGTH)
+  if (attachments.length > 0) return `📎 ${attachments[0].name || 'Attachment'}`
+  return ''
 }
 
 async function loadConversationOr404(conversationId: ConversationId): Promise<Conversation> {
@@ -82,7 +131,8 @@ export async function sendVisitorMessage(
   author: ChatAuthorInput,
   actor: Actor
 ): Promise<SendVisitorMessageResult> {
-  const content = validateContent(input.content)
+  const attachments = validateAttachments(input.attachments)
+  const content = validateContent(input.content, attachments.length > 0)
 
   let created = false
   const txResult = await db.transaction(async (tx) => {
@@ -113,7 +163,7 @@ export async function sendVisitorMessage(
         .values({
           visitorPrincipalId: author.principalId,
           status: 'open',
-          subject: preview(content),
+          subject: preview(content, attachments),
         })
         .returning()
       conversation = createdConv
@@ -127,6 +177,7 @@ export async function sendVisitorMessage(
         principalId: author.principalId,
         senderType: 'visitor',
         content,
+        attachments: attachments.length > 0 ? attachments : null,
       })
       .returning()
 
@@ -134,7 +185,7 @@ export async function sendVisitorMessage(
       .update(conversations)
       .set({
         lastMessageAt: message.createdAt,
-        lastMessagePreview: preview(content),
+        lastMessagePreview: preview(content, attachments),
         // Visitor is active, so their side is read; a reply reopens a closed thread.
         visitorLastReadAt: message.createdAt,
         status: conversation.status === 'closed' ? 'open' : conversation.status,
@@ -160,7 +211,7 @@ export async function sendVisitorMessage(
 
   void notifyVisitorMessage({
     conversation: txResult.conversation,
-    content,
+    content: preview(content, attachments),
     authorName: author.displayName ?? 'A visitor',
     isFirstMessage: created,
   })
@@ -173,12 +224,14 @@ export async function sendAgentMessage(
   conversationId: ConversationId,
   rawContent: string,
   agent: ChatAuthorInput,
-  actor: Actor
+  actor: Actor,
+  rawAttachments?: ChatAttachment[]
 ): Promise<SendAgentMessageResult> {
   const decision = canActAsAgent(actor)
   if (!decision.allowed) throw new ForbiddenError('FORBIDDEN', decision.reason)
 
-  const content = validateContent(rawContent)
+  const attachments = validateAttachments(rawAttachments)
+  const content = validateContent(rawContent, attachments.length > 0)
 
   const txResult = await db.transaction(async (tx) => {
     const [existing] = await tx
@@ -197,6 +250,7 @@ export async function sendAgentMessage(
         principalId: agent.principalId,
         senderType: 'agent',
         content,
+        attachments: attachments.length > 0 ? attachments : null,
       })
       .returning()
 
@@ -204,7 +258,7 @@ export async function sendAgentMessage(
       .update(conversations)
       .set({
         lastMessageAt: message.createdAt,
-        lastMessagePreview: preview(content),
+        lastMessagePreview: preview(content, attachments),
         // Replying counts as reading; claim the conversation if unassigned.
         agentLastReadAt: message.createdAt,
         assignedAgentPrincipalId: existing.assignedAgentPrincipalId ?? agent.principalId,
@@ -229,7 +283,7 @@ export async function sendAgentMessage(
 
   void notifyAgentReply({
     visitorPrincipalId: txResult.conversation.visitorPrincipalId,
-    content,
+    content: preview(content, attachments),
     agentName: agent.displayName ?? 'Support',
   })
 

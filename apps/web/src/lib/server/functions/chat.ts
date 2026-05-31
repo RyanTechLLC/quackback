@@ -10,7 +10,12 @@
 import { z } from 'zod'
 import { createServerFn } from '@tanstack/react-start'
 import type { ConversationId, PrincipalId } from '@quackback/ids'
-import { MAX_CHAT_MESSAGE_LENGTH, type ChatSenderType } from '@/lib/shared/chat/types'
+import {
+  MAX_CHAT_MESSAGE_LENGTH,
+  MAX_CHAT_ATTACHMENTS,
+  type ChatSenderType,
+  type ChatAttachment,
+} from '@/lib/shared/chat/types'
 import {
   getOptionalAuth,
   requireAuth,
@@ -19,9 +24,19 @@ import {
 } from './auth-helpers'
 import { isTeamMember } from '@/lib/shared/roles'
 
+const attachmentSchema = z.object({
+  url: z.string().min(1),
+  name: z.string().max(255),
+  contentType: z.string().max(128),
+  size: z.number().int().nonnegative(),
+})
+
+// Content may be empty only when attachments are present (validated in the
+// service); allow empty here and let the service enforce the real rule.
 const sendMessageSchema = z.object({
   conversationId: z.string().optional(),
-  content: z.string().min(1).max(MAX_CHAT_MESSAGE_LENGTH),
+  content: z.string().max(MAX_CHAT_MESSAGE_LENGTH).default(''),
+  attachments: z.array(attachmentSchema).max(MAX_CHAT_ATTACHMENTS).optional(),
 })
 
 const conversationIdSchema = z.object({ conversationId: z.string() })
@@ -39,7 +54,8 @@ const listConversationsSchema = z.object({
 
 const agentSendSchema = z.object({
   conversationId: z.string(),
-  content: z.string().min(1).max(MAX_CHAT_MESSAGE_LENGTH),
+  content: z.string().max(MAX_CHAT_MESSAGE_LENGTH).default(''),
+  attachments: z.array(attachmentSchema).max(MAX_CHAT_ATTACHMENTS).optional(),
 })
 
 const setStatusSchema = z.object({
@@ -81,6 +97,7 @@ export const sendChatMessageFn = createServerFn({ method: 'POST' })
         {
           conversationId: data.conversationId as ConversationId | undefined,
           content: data.content,
+          attachments: data.attachments as ChatAttachment[] | undefined,
         },
         {
           principalId: ctx.principal.id,
@@ -266,7 +283,8 @@ export const sendAgentMessageFn = createServerFn({ method: 'POST' })
           displayName: ctx.user.name,
           avatarUrl: ctx.user.image,
         },
-        actor
+        actor,
+        data.attachments as ChatAttachment[] | undefined
       )
     } catch (error) {
       console.error('[fn:chat] sendAgentMessageFn failed:', error)
