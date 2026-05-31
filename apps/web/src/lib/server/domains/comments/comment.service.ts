@@ -15,12 +15,12 @@ import { NotFoundError, ValidationError, ForbiddenError } from '@/lib/shared/err
 import { isTeamMember } from '@/lib/shared/roles'
 import { subscribeToPost } from '@/lib/server/domains/subscriptions/subscription.service'
 import {
-  dispatchCommentCreated,
   dispatchCommentUpdated,
   dispatchCommentDeleted,
   dispatchPostStatusChanged,
   buildEventActor,
 } from '@/lib/server/events/dispatch'
+import { dispatchCommentCreatedEvent } from './comment.announce'
 import { commentMarkdownToTiptapJson } from '@/lib/server/markdown-tiptap'
 import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
 import type { TiptapContent } from '@/lib/shared/db-types'
@@ -277,23 +277,12 @@ export async function createComment(
   // the comment is visible. Held comments fire dispatch only on approval
   // via approveCommentFn — mirroring the post-moderation flow.
   if (!options?.skipDispatch && initialModerationState === 'published') {
-    // Dispatch comment.created event for webhooks, Slack, etc.
-    const actorName = author.displayName ?? author.name
-    await dispatchCommentCreated(
-      buildEventActor(author),
-      {
-        id: comment.id,
-        content: comment.content,
-        authorName: actorName,
-        authorEmail: author.email,
-        isPrivate,
-      },
-      {
-        id: post.id,
-        title: post.title,
-        boardId: board.id,
-        boardSlug: board.slug,
-      }
+    // Dispatch comment.created for webhooks, Slack, etc. Shares the payload
+    // mapping with approveCommentFn's release path via dispatchCommentCreatedEvent.
+    await dispatchCommentCreatedEvent(
+      author,
+      { id: comment.id, content: comment.content, isPrivate },
+      { id: post.id, title: post.title, boardId: board.id, boardSlug: board.slug }
     )
 
     // Dispatch status change event if status was changed

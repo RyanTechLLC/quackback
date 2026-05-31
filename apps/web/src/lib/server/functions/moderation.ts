@@ -57,6 +57,38 @@ async function requireTeamAuth() {
   return auth
 }
 
+/**
+ * Correlated guard: the current `posts` row's board is not soft-deleted.
+ * The queue LIST/COUNT queries already filter through `boards.deletedAt`;
+ * folding this into the guarded approve/reject UPDATE closes the TOCTOU
+ * window between queue display and the write (no ghost-publishing into a
+ * board that was soft-deleted out from under the moderator).
+ */
+function boardAliveForPost() {
+  return exists(
+    db
+      .select({ one: sql`1` })
+      .from(boards)
+      .where(and(eq(boards.id, posts.boardId), isNull(boards.deletedAt)))
+  )
+}
+
+/**
+ * Correlated guard: the current `comments` row's parent post AND that post's
+ * board are both not soft-deleted. Matches the parent-deletedAt filter on the
+ * comment LIST/COUNT queries so approve/reject can't write to a comment whose
+ * parent was soft-deleted. Composes {@link boardAliveForPost} so the
+ * board-alive invariant lives in exactly one place.
+ */
+function parentChainAliveForComment() {
+  return exists(
+    db
+      .select({ one: sql`1` })
+      .from(posts)
+      .where(and(eq(posts.id, comments.postId), isNull(posts.deletedAt), boardAliveForPost()))
+  )
+}
+
 export const listPendingPostsFn = createServerFn({ method: 'GET' }).handler(async () => {
   await requireTeamAuth()
   const rows = await db
@@ -122,15 +154,7 @@ export const approvePostFn = createServerFn({ method: 'POST' })
           eq(posts.id, data.postId as never),
           eq(posts.moderationState, 'pending'),
           isNull(posts.deletedAt),
-          // Block ghost-publishing into a soft-deleted board. The LIST/COUNT
-          // queries already filter through boards.deletedAt; this closes the
-          // TOCTOU window between queue display and the guarded UPDATE.
-          exists(
-            db
-              .select({ one: sql`1` })
-              .from(boards)
-              .where(and(eq(boards.id, posts.boardId), isNull(boards.deletedAt)))
-          )
+          boardAliveForPost()
         )
       )
       .returning({ id: posts.id })
@@ -184,26 +208,7 @@ export const approveCommentFn = createServerFn({ method: 'POST' })
             eq(comments.id, data.commentId as never),
             eq(comments.moderationState, 'pending'),
             isNull(comments.deletedAt),
-            // Block approval when the parent post or its board is soft-deleted.
-            // Matches the parent-deletedAt filter already applied to the
-            // LIST/COUNT queries; closes the TOCTOU window in the guarded UPDATE.
-            exists(
-              db
-                .select({ one: sql`1` })
-                .from(posts)
-                .where(
-                  and(
-                    eq(posts.id, comments.postId),
-                    isNull(posts.deletedAt),
-                    exists(
-                      db
-                        .select({ one: sql`1` })
-                        .from(boards)
-                        .where(and(eq(boards.id, posts.boardId), isNull(boards.deletedAt)))
-                    )
-                  )
-                )
-            )
+            parentChainAliveForComment()
           )
         )
         .returning({ id: comments.id, postId: comments.postId, isPrivate: comments.isPrivate })
@@ -255,25 +260,7 @@ export const rejectCommentFn = createServerFn({ method: 'POST' })
           eq(comments.id, data.commentId as never),
           eq(comments.moderationState, 'pending'),
           isNull(comments.deletedAt),
-          // Match the LIST/COUNT parent-deletedAt filter so reject can't write
-          // to a comment whose parent post or board has been soft-deleted.
-          exists(
-            db
-              .select({ one: sql`1` })
-              .from(posts)
-              .where(
-                and(
-                  eq(posts.id, comments.postId),
-                  isNull(posts.deletedAt),
-                  exists(
-                    db
-                      .select({ one: sql`1` })
-                      .from(boards)
-                      .where(and(eq(boards.id, posts.boardId), isNull(boards.deletedAt)))
-                  )
-                )
-              )
-          )
+          parentChainAliveForComment()
         )
       )
       .returning({ id: comments.id })
@@ -307,14 +294,7 @@ export const rejectPostFn = createServerFn({ method: 'POST' })
           eq(posts.id, data.postId as never),
           eq(posts.moderationState, 'pending'),
           isNull(posts.deletedAt),
-          // Match the LIST/COUNT board-deletedAt filter so reject can't write
-          // to a post whose board has been soft-deleted out from under us.
-          exists(
-            db
-              .select({ one: sql`1` })
-              .from(boards)
-              .where(and(eq(boards.id, posts.boardId), isNull(boards.deletedAt)))
-          )
+          boardAliveForPost()
         )
       )
       .returning({ id: posts.id })
