@@ -202,6 +202,9 @@ export const getMyChatFn = createServerFn({ method: 'GET' }).handler(async () =>
       // Whether an offline reply could actually reach this visitor by email —
       // the widget shows a non-promising offline message when false.
       canEmailVisitor: canEmailVisitor({ emailConfigured, preChatEmail, visitorHasEmail: false }),
+      // Whether the surfaced conversation is closed (read-only) — the widget
+      // then offers "start a new conversation" instead of a composer (P1.9).
+      isReadOnly: false,
     }
 
     if (!enabled || !hasAuthCredentials()) {
@@ -227,10 +230,11 @@ export const getMyChatFn = createServerFn({ method: 'GET' }).handler(async () =>
       await import('@/lib/server/domains/chat/chat.query')
     const { isAnyAgentOnline } = await import('@/lib/server/realtime/presence')
 
-    const [conversation, agentsOnline] = await Promise.all([
+    const [active, agentsOnline] = await Promise.all([
       getActiveConversationForVisitor(ctx.principal.id),
       isAnyAgentOnline(),
     ])
+    const conversation = active.conversation
     const visitorHasEmail = Boolean(ctx.user?.email) || Boolean(conversation?.visitorEmail)
     const canEmail = canEmailVisitor({ emailConfigured, preChatEmail, visitorHasEmail })
     if (!conversation) {
@@ -253,6 +257,7 @@ export const getMyChatFn = createServerFn({ method: 'GET' }).handler(async () =>
       ...base,
       visitorHasEmail,
       canEmailVisitor: canEmail,
+      isReadOnly: active.isReadOnly,
       conversation: dto,
       messages: page.messages,
       hasMore: page.hasMore,

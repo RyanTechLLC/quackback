@@ -159,16 +159,42 @@ export async function conversationToDTO(
 }
 
 /** The visitor's most-recent conversation, if any (so the widget can resume). */
+export interface ActiveConversationResult {
+  conversation: Conversation | null
+  /** True when the surfaced thread is closed — the widget shows it read-only
+   *  and offers to start a new conversation instead of a composer. */
+  isReadOnly: boolean
+}
+
+// Statuses a returning visitor can still reply to. 'pending' = waiting on the
+// customer, so they can resume; 'snoozed' is an agent-side defer the visitor
+// is unaware of (a reply un-defers it). Only 'closed' is read-only.
+const RESUMABLE_STATUSES: ReadonlySet<string> = new Set(['open', 'snoozed', 'pending'])
+
+/**
+ * Pick the conversation to surface to a returning visitor from their recent
+ * threads (passed most-recent-first). A resumable thread always wins, even over
+ * a more-recent closed one; if only closed threads exist, the most-recent is
+ * shown read-only so the widget can offer "start a new conversation".
+ */
+export function selectActiveConversation(rows: Conversation[]): ActiveConversationResult {
+  const resumable = rows.find((r) => RESUMABLE_STATUSES.has(r.status))
+  if (resumable) return { conversation: resumable, isReadOnly: false }
+  return { conversation: rows[0] ?? null, isReadOnly: rows.length > 0 }
+}
+
 export async function getActiveConversationForVisitor(
   visitorPrincipalId: PrincipalId
-): Promise<Conversation | null> {
-  const [row] = await db
+): Promise<ActiveConversationResult> {
+  // Fetch a small recent window (not just LIMIT 1) so an older still-open thread
+  // can win over a more-recent closed one.
+  const rows = await db
     .select()
     .from(conversations)
     .where(eq(conversations.visitorPrincipalId, visitorPrincipalId))
     .orderBy(desc(conversations.lastMessageAt))
-    .limit(1)
-  return row ?? null
+    .limit(10)
+  return selectActiveConversation(rows)
 }
 
 /** All of a visitor's conversations, newest-first — for the admin user profile. */
