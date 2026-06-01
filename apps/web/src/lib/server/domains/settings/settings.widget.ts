@@ -10,7 +10,7 @@ import type {
 import { DEFAULT_WIDGET_CONFIG, DEFAULT_LIVE_CHAT_CONFIG } from './settings.types'
 
 /** Drop agent-only fields (cannedReplies) from a chat config for public exposure. */
-function publicLiveChatConfig(chat: LiveChatConfig): PublicLiveChatConfig {
+export function publicLiveChatConfig(chat: LiveChatConfig): PublicLiveChatConfig {
   return {
     enabled: chat.enabled,
     welcomeMessage: chat.welcomeMessage,
