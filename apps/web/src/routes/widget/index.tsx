@@ -6,7 +6,13 @@ import { CheckCircleIcon } from '@heroicons/react/24/solid'
 import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { WidgetVoteButton } from '@/components/widget/widget-vote-button'
 import type { PostId } from '@quackback/ids'
-import { WidgetShell, type WidgetTab } from '@/components/widget/widget-shell'
+import { WidgetShell } from '@/components/widget/widget-shell'
+import {
+  type WidgetTab,
+  type WidgetView,
+  resolveInitialTab,
+  resolveInitialView,
+} from '@/components/widget/widget-nav'
 import { WidgetHome } from '@/components/widget/widget-home'
 import { WidgetPostDetail } from '@/components/widget/widget-post-detail'
 import { WidgetChangelog } from '@/components/widget/widget-changelog'
@@ -106,17 +112,6 @@ export const Route = createFileRoute('/widget/')({
   component: WidgetPage,
 })
 
-type WidgetView =
-  | 'home'
-  | 'post-detail'
-  | 'success'
-  | 'changelog'
-  | 'changelog-detail'
-  | 'help'
-  | 'help-category'
-  | 'help-detail'
-  | 'chat'
-
 interface SuccessPost {
   id: string
   title: string
@@ -161,22 +156,8 @@ function WidgetPage() {
     staleTime: 30 * 1000,
   })
 
-  const initialTab: WidgetTab = tabs.feedback
-    ? 'feedback'
-    : tabs.changelog
-      ? 'changelog'
-      : tabs.help
-        ? 'help'
-        : 'chat'
-  const [view, setView] = useState<WidgetView>(
-    initialTab === 'changelog'
-      ? 'changelog'
-      : initialTab === 'help'
-        ? 'help'
-        : initialTab === 'chat'
-          ? 'chat'
-          : 'home'
-  )
+  const initialTab = resolveInitialTab(tabs)
+  const [view, setView] = useState<WidgetView>(resolveInitialView(tabs))
   const [activeTab, setActiveTab] = useState<WidgetTab>(initialTab)
   const [successPost, setSuccessPost] = useState<SuccessPost | null>(null)
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null)
@@ -259,14 +240,14 @@ function WidgetPage() {
       return
     }
     setSelectedPostId(null)
-    setView('home')
+    setView('feedback-feed')
   }, [view, selectedCategory])
 
   const handleTabChange = useCallback((tab: WidgetTab) => {
     setActiveTab(tab)
     if (tab === 'feedback') {
       setSelectedPostId(null)
-      setView('home')
+      setView('feedback-feed')
     } else if (tab === 'changelog') {
       setSelectedChangelogId(null)
       setView('changelog')
@@ -303,7 +284,7 @@ function WidgetPage() {
   }, [])
 
   const shellOnBack =
-    view !== 'home' && view !== 'changelog' && view !== 'help' && view !== 'chat'
+    view !== 'feedback-feed' && view !== 'changelog' && view !== 'help' && view !== 'chat'
       ? handleBack
       : undefined
 
@@ -350,8 +331,8 @@ function WidgetPage() {
       {/* Keep home mounted (hidden) when viewing post detail so form state is preserved */}
       <div
         className={
-          view === 'home' || view === 'post-detail'
-            ? view === 'home'
+          view === 'feedback-feed' || view === 'post-detail'
+            ? view === 'feedback-feed'
               ? 'flex flex-col h-full'
               : 'hidden'
             : 'hidden'

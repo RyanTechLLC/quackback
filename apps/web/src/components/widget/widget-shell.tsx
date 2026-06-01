@@ -16,7 +16,8 @@ import { getWidgetAuthHeaders, generateOneTimeToken } from '@/lib/client/widget-
 import { sendToHost } from '@/lib/client/widget-bridge'
 import { useWidgetAuth } from './widget-auth-provider'
 
-export type WidgetTab = 'feedback' | 'changelog' | 'help' | 'chat'
+import type { WidgetTab } from './widget-nav'
+export type { WidgetTab }
 
 const TAB_CONFIG: {
   tab: WidgetTab
