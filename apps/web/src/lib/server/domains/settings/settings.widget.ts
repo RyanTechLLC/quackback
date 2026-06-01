@@ -9,7 +9,7 @@ import type {
 } from './settings.types'
 import { DEFAULT_WIDGET_CONFIG, DEFAULT_LIVE_CHAT_CONFIG } from './settings.types'
 
-/** Drop agent-only fields (cannedReplies, macros) from a chat config for public
+/** Drop agent-only fields (cannedReplies) from a chat config for public
  *  exposure. Allowlist projection: new fields are excluded unless added here. */
 export function publicLiveChatConfig(chat: LiveChatConfig): PublicLiveChatConfig {
   return {
