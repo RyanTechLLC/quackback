@@ -763,6 +763,7 @@ const updateWidgetConfigSchema = z.object({
         )
         .max(100)
         .optional(),
+      firstResponseTargetMinutes: z.number().int().min(1).max(10080).optional(),
     })
     .optional(),
 })

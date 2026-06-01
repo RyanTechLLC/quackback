@@ -26,6 +26,8 @@ import {
 } from '@/lib/server/db'
 import { requireAuth } from './auth-helpers'
 import { summarizeCsat } from '@/lib/server/domains/analytics/csat-summary'
+import { summarizeFirstResponse } from '@/lib/server/domains/analytics/first-response'
+import { getLiveChatConfig } from '@/lib/server/domains/settings/settings.widget'
 import { toIsoDateOnly } from '@/lib/shared/utils/date'
 
 export const getAnalyticsData = createServerFn({ method: 'GET' })
@@ -256,6 +258,32 @@ export const getAnalyticsData = createServerFn({ method: 'GET' })
         ? Math.min(100, Math.round((csatSummary.responseCount / closedCount) * 100))
         : 0
 
+    // -- First response time (live query) -- first visitor message vs first
+    // (non-internal) agent reply per conversation whose first visitor message
+    // falls in the period. FILTER aggregates make this one grouped pass.
+    const frRows = await db.execute(sql`
+      SELECT
+        MIN(created_at) FILTER (WHERE sender_type = 'visitor') AS first_visitor_at,
+        MIN(created_at) FILTER (WHERE sender_type = 'agent' AND is_internal = false) AS first_agent_at
+      FROM chat_messages
+      WHERE deleted_at IS NULL
+      GROUP BY conversation_id
+      HAVING MIN(created_at) FILTER (WHERE sender_type = 'visitor') >= ${sinceIso}::timestamptz
+    `)
+    const frPairs = (
+      frRows as unknown as Array<{ first_visitor_at: string | null; first_agent_at: string | null }>
+    )
+      .filter((r) => r.first_visitor_at)
+      .map((r) => ({
+        firstVisitorAt: r.first_visitor_at as string,
+        firstAgentAt: r.first_agent_at,
+      }))
+    const targetMinutes = (await getLiveChatConfig()).firstResponseTargetMinutes
+    const firstResponse = {
+      ...summarizeFirstResponse(frPairs, targetMinutes),
+      targetMinutes: targetMinutes ?? null,
+    }
+
     // -- Computed at timestamp --
     const computedAt = latestRow?.computedAt?.toISOString() ?? null
 
@@ -273,6 +301,7 @@ export const getAnalyticsData = createServerFn({ method: 'GET' })
         responseRate,
         distribution: csatSummary.distribution,
       },
+      firstResponse,
       changelog: {
         totalViews,
         totalReactions: 0,

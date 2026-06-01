@@ -55,6 +55,11 @@ function LiveChatSettingsPage() {
   const [preChatEmail, setPreChatEmail] = useState<'off' | 'optional' | 'required'>(
     config.chat?.preChatEmail ?? 'off'
   )
+  const [firstResponseTarget, setFirstResponseTarget] = useState<string>(
+    config.chat?.firstResponseTargetMinutes != null
+      ? String(config.chat.firstResponseTargetMinutes)
+      : ''
+  )
 
   const widgetEnabled = config.enabled
 
@@ -239,6 +244,32 @@ function LiveChatSettingsPage() {
             </select>
             <p className="text-xs text-muted-foreground">
               Capture an email from anonymous visitors so you can follow up by email when offline.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="chat-first-response-target">First response target (minutes)</Label>
+            <Input
+              id="chat-first-response-target"
+              type="number"
+              min={1}
+              max={10080}
+              value={firstResponseTarget}
+              placeholder="e.g. 60"
+              onChange={(e) => setFirstResponseTarget(e.target.value)}
+              onBlur={() => {
+                const parsed = Number.parseInt(firstResponseTarget, 10)
+                if (Number.isInteger(parsed) && parsed >= 1) {
+                  void persist('firstResponseTarget', {
+                    chat: { firstResponseTargetMinutes: parsed },
+                  })
+                }
+              }}
+              disabled={isBusy || !enabled}
+              className="max-w-40"
+            />
+            <p className="text-xs text-muted-foreground">
+              Used by support analytics to report how quickly the team first replies.
             </p>
           </div>
         </div>

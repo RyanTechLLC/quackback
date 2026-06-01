@@ -473,6 +473,8 @@ export interface LiveChatConfig {
   cannedReplies?: CannedReply[]
   /** Agent-only one-click action macros — NEVER projected into the public config. */
   macros?: ChatMacro[]
+  /** Target minutes for a first agent response, used by support analytics. */
+  firstResponseTargetMinutes?: number
 }
 
 /** Client-safe subset of LiveChatConfig (drops agent-only fields). */

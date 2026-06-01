@@ -19,6 +19,7 @@ import { AnalyticsChangelogCard } from './analytics-changelog-card'
 import { AnalyticsTopPosts } from './analytics-top-posts'
 import { AnalyticsTopContributors } from './analytics-top-contributors'
 import { AnalyticsCsatCard } from './analytics-csat-card'
+import { AnalyticsFirstResponseCard } from './analytics-first-response-card'
 
 // Defer recharts (~580KB minified, including victory-vendor) and the chart
 // primitives that wrap it. Analytics is admin-gated and rarely the first
@@ -185,14 +186,24 @@ export function AnalyticsPage() {
                 )}
 
                 {section === 'support' && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Customer satisfaction (CSAT)</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <AnalyticsCsatCard csat={data.csat} />
-                    </CardContent>
-                  </Card>
+                  <div className="flex flex-col gap-6">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>First response time</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <AnalyticsFirstResponseCard firstResponse={data.firstResponse} />
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Customer satisfaction (CSAT)</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <AnalyticsCsatCard csat={data.csat} />
+                      </CardContent>
+                    </Card>
+                  </div>
                 )}
 
                 {section === 'changelog' && (
