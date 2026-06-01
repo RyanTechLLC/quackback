@@ -715,6 +715,7 @@ const updateWidgetConfigSchema = z.object({
       changelog: z.boolean().optional(),
       help: z.boolean().optional(),
       chat: z.boolean().optional(),
+      home: z.boolean().optional(),
     })
     .optional(),
   chat: z

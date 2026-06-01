@@ -37,6 +37,12 @@ export interface EnabledTabs {
   changelog?: boolean
   help?: boolean
   chat?: boolean
+  /**
+   * Admin opt-out for the aggregated Home tab. Defaults to shown; when false,
+   * the widget skips Home and lands directly on the first surface even with 2+
+   * content surfaces enabled.
+   */
+  home?: boolean
 }
 
 /** The support surface is on when either help articles or live chat is enabled. */
@@ -57,9 +63,12 @@ export function contentSurfaceCount(tabs: EnabledTabs): number {
   return [tabs.feedback, tabs.changelog, supportEnabled(tabs)].filter(Boolean).length
 }
 
-/** The aggregated Home is only worthwhile when 2+ content surfaces are enabled. */
+/**
+ * The aggregated Home is only worthwhile when 2+ content surfaces are enabled,
+ * and only when the admin hasn't opted out of it (defaults to shown).
+ */
 export function homeEnabled(tabs: EnabledTabs): boolean {
-  return contentSurfaceCount(tabs) > 1
+  return (tabs.home ?? true) && contentSurfaceCount(tabs) > 1
 }
 
 /** Ordered tabs the bottom bar should render (Home first, only when enabled). */

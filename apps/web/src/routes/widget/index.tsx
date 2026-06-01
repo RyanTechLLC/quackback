@@ -99,6 +99,8 @@ export const Route = createFileRoute('/widget/')({
           ((settings?.featureFlags as { liveChat?: boolean } | undefined)?.liveChat ?? false) &&
           (settings?.publicWidgetConfig?.chat?.enabled ?? false) &&
           (settings?.publicWidgetConfig?.tabs?.chat ?? false),
+        // Admin opt-out for the aggregated Home tab (defaults to shown).
+        home: settings?.publicWidgetConfig?.tabs?.home ?? true,
       },
       imageUploadsInWidget: settings?.publicWidgetConfig?.imageUploadsInWidget ?? true,
       defaultBoard: settings?.publicWidgetConfig?.defaultBoard,

@@ -469,6 +469,8 @@ export interface WidgetConfig {
     changelog?: boolean
     help?: boolean
     chat?: boolean
+    /** Show the aggregated Home tab (defaults to on; only appears with 2+ sections) */
+    home?: boolean
   }
   /** Whether authenticated widget users can upload images in feedback submissions */
   imageUploadsInWidget?: boolean
@@ -515,6 +517,7 @@ export const DEFAULT_WIDGET_CONFIG: WidgetConfig = {
     feedback: true,
     changelog: false,
     chat: false,
+    home: true,
   },
   chat: DEFAULT_LIVE_CHAT_CONFIG,
 }
@@ -532,6 +535,7 @@ export interface UpdateWidgetConfigInput {
     changelog?: boolean
     help?: boolean
     chat?: boolean
+    home?: boolean
   }
   imageUploadsInWidget?: boolean
   chat?: Partial<LiveChatConfig>

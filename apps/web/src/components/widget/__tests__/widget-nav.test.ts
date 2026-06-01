@@ -55,6 +55,16 @@ describe('homeEnabled', () => {
     expect(homeEnabled({ feedback: true, changelog: true })).toBe(true)
     expect(homeEnabled({ feedback: true, chat: true })).toBe(true)
   })
+  it('defaults to shown when the home preference is omitted', () => {
+    expect(homeEnabled({ feedback: true, changelog: true, home: undefined })).toBe(true)
+  })
+  it('honors the admin opt-out even with 2+ content surfaces', () => {
+    expect(homeEnabled({ feedback: true, changelog: true, home: false })).toBe(false)
+    expect(homeEnabled({ feedback: true, changelog: true, home: true })).toBe(true)
+  })
+  it('stays hidden with a single surface regardless of the home preference', () => {
+    expect(homeEnabled({ feedback: true, home: true })).toBe(false)
+  })
 })
 
 describe('visibleTabs', () => {
@@ -76,6 +86,12 @@ describe('visibleTabs', () => {
     expect(visibleTabs({ chat: true })).toEqual(['help'])
     expect(visibleTabs({ help: true, chat: true })).toEqual(['help'])
   })
+  it('drops Home when the admin disables it', () => {
+    expect(visibleTabs({ feedback: true, changelog: true, home: false })).toEqual([
+      'feedback',
+      'changelog',
+    ])
+  })
 })
 
 describe('resolveInitialTab', () => {
@@ -88,6 +104,9 @@ describe('resolveInitialTab', () => {
     expect(resolveInitialTab({ changelog: true })).toBe('changelog')
     expect(resolveInitialTab({ help: true, chat: true })).toBe('help')
     expect(resolveInitialTab({ chat: true })).toBe('help')
+  })
+  it('lands on the first surface when the admin disables Home', () => {
+    expect(resolveInitialTab({ feedback: true, changelog: true, home: false })).toBe('feedback')
   })
 })
 
@@ -102,5 +121,8 @@ describe('resolveInitialView', () => {
     expect(resolveInitialView({ help: true })).toBe('help')
     expect(resolveInitialView({ help: true, chat: true })).toBe('help')
     expect(resolveInitialView({ chat: true })).toBe('chat')
+  })
+  it('lands on the first surface root when the admin disables Home', () => {
+    expect(resolveInitialView({ feedback: true, changelog: true, home: false })).toBe('feedback')
   })
 })
