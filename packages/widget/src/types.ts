@@ -19,8 +19,8 @@ export interface InitOptions {
  *
  * For anonymous sessions, call `identify()` with no argument — don't pass
  * `{ anonymous: true }`. (The runtime still accepts `{ anonymous: true }` for
- * backwards-compat with muscle memory from Intercom/Featurebase, but it's not
- * in the type so TypeScript users get nudged to the cleaner form.)
+ * backwards-compat with older integrations, but it's not in the type so
+ * TypeScript users get nudged to the cleaner form.)
  */
 export type Identity =
   | { ssoToken: string }

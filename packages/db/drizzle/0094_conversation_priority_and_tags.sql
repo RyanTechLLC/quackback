@@ -1,8 +1,8 @@
 -- Conversation triage metadata: an agent-set priority + reusable labels.
 -- Both additive/backfill-safe. priority's constant default backfills every
 -- existing row to 'none' with no table rewrite (PG 11+). conversation_tags
--- reuses the shared "tags" vocabulary (it was dropped in 0091; re-added here as
--- part of the unified support inbox, unifying chat + feedback labels).
+-- reuses the shared "tags" vocabulary (it was dropped in 0091; re-added here to
+-- unify chat + feedback labels under one vocabulary).
 
 ALTER TABLE "conversations" ADD COLUMN "priority" text DEFAULT 'none' NOT NULL;
 
