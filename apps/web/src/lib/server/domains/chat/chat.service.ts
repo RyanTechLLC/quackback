@@ -15,13 +15,12 @@ import {
   isNull,
   conversations,
   chatMessages,
-  conversationTags,
   principal,
   type Conversation,
 } from '@/lib/server/db'
 import { isTeamMember } from '@/lib/shared/roles'
 import type { ChatAttachment } from '@/lib/server/db'
-import type { ConversationId, ChatMessageId, PrincipalId, TagId } from '@quackback/ids'
+import type { ConversationId, ChatMessageId, PrincipalId } from '@quackback/ids'
 import { NotFoundError, ValidationError, ForbiddenError } from '@/lib/shared/errors'
 import { config } from '@/lib/server/config'
 import {
@@ -496,36 +495,6 @@ export async function setConversationPriority(
   const dto = await conversationToDTO(updated, 'agent')
   publishConversationUpdate(conversationId, dto)
   return updated
-}
-
-/** Agent action: label a conversation with a shared tag. Idempotent. */
-export async function addConversationTag(
-  conversationId: ConversationId,
-  tagId: TagId,
-  actor: Actor
-): Promise<void> {
-  const decision = canActAsAgent(actor)
-  if (!decision.allowed) throw new ForbiddenError('FORBIDDEN', decision.reason)
-  const conversation = await loadConversationOr404(conversationId)
-  await db.insert(conversationTags).values({ conversationId, tagId }).onConflictDoNothing()
-  publishConversationUpdate(conversationId, await conversationToDTO(conversation, 'agent'))
-}
-
-/** Agent action: remove a tag from a conversation. Idempotent. */
-export async function removeConversationTag(
-  conversationId: ConversationId,
-  tagId: TagId,
-  actor: Actor
-): Promise<void> {
-  const decision = canActAsAgent(actor)
-  if (!decision.allowed) throw new ForbiddenError('FORBIDDEN', decision.reason)
-  const conversation = await loadConversationOr404(conversationId)
-  await db
-    .delete(conversationTags)
-    .where(
-      and(eq(conversationTags.conversationId, conversationId), eq(conversationTags.tagId, tagId))
-    )
-  publishConversationUpdate(conversationId, await conversationToDTO(conversation, 'agent'))
 }
 
 /** Soft-delete a message. Team members may delete any message; a visitor may

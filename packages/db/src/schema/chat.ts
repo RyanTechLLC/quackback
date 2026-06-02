@@ -1,17 +1,7 @@
-import {
-  pgTable,
-  text,
-  timestamp,
-  index,
-  uniqueIndex,
-  jsonb,
-  integer,
-  boolean,
-} from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, index, jsonb, integer, boolean } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { typeIdWithDefault, typeIdColumn, typeIdColumnNullable } from '@quackback/ids/drizzle'
 import { principal } from './auth'
-import { tags } from './boards'
 import {
   CONVERSATION_STATUSES,
   CHAT_SENDER_TYPES,
@@ -76,29 +66,6 @@ export const conversations = pgTable(
     index('conversations_status_last_message_idx').on(table.status, table.lastMessageAt),
     index('conversations_visitor_principal_idx').on(table.visitorPrincipalId),
     index('conversations_assigned_agent_idx').on(table.assignedAgentPrincipalId),
-  ]
-)
-
-/**
- * Conversation labels — reuses the shared `tags` vocabulary so the inbox and
- * feedback posts draw from one set of labels (powering the feedback<->support
- * loop). Agent-only; never exposed to the visitor. Both FKs cascade so deleting
- * a tag or a conversation cleans up here.
- */
-export const conversationTags = pgTable(
-  'conversation_tags',
-  {
-    conversationId: typeIdColumn('conversation')('conversation_id')
-      .notNull()
-      .references(() => conversations.id, { onDelete: 'cascade' }),
-    tagId: typeIdColumn('tag')('tag_id')
-      .notNull()
-      .references(() => tags.id, { onDelete: 'cascade' }),
-  },
-  (table) => [
-    uniqueIndex('conversation_tags_pk').on(table.conversationId, table.tagId),
-    index('conversation_tags_conversation_id_idx').on(table.conversationId),
-    index('conversation_tags_tag_id_idx').on(table.tagId),
   ]
 )
 

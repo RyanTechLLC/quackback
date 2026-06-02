@@ -44,10 +44,8 @@ import {
   PriorityMenuItems,
 } from '@/components/admin/chat/priority-control'
 import { AssigneeControl } from '@/components/admin/chat/assignee-control'
-import { ConversationTags } from '@/components/admin/chat/conversation-tags'
 import { LinkedPosts } from '@/components/admin/chat/linked-posts'
 import { ChannelBadge, NoEmailBadge } from '@/components/admin/chat/channel-badge'
-import { TagChip } from '@/components/shared/tag-chip'
 import { useChatStream } from '@/lib/client/hooks/use-chat-stream'
 import { useChatTyping } from '@/lib/client/hooks/use-chat-typing'
 import { useImageUpload } from '@/lib/client/hooks/use-image-upload'
@@ -356,22 +354,9 @@ function InboxPage() {
                   <p className="truncate text-xs text-muted-foreground mt-0.5">
                     {c.lastMessagePreview ?? c.subject ?? 'No messages yet'}
                   </p>
-                  {(c.channel !== 'live_chat' || c.tags.length > 0) && (
+                  {c.channel !== 'live_chat' && (
                     <div className="mt-1 flex flex-wrap items-center gap-1">
                       <ChannelBadge channel={c.channel} />
-                      {c.tags.slice(0, 2).map((tag) => (
-                        <TagChip
-                          key={tag.id}
-                          name={tag.name}
-                          color={tag.color}
-                          className="max-w-24"
-                        />
-                      ))}
-                      {c.tags.length > 2 && (
-                        <span className="text-[10px] text-muted-foreground">
-                          +{c.tags.length - 2}
-                        </span>
-                      )}
                     </div>
                   )}
                 </div>
@@ -925,11 +910,7 @@ function ChatThread({
         </div>
       </div>
 
-      <VisitorSidebar
-        conversation={conversation}
-        detail={visitorDetail}
-        onChanged={refreshThread}
-      />
+      <VisitorSidebar conversation={conversation} detail={visitorDetail} />
     </div>
   )
 }
@@ -1025,11 +1006,9 @@ function AdminBubble({ message, onDelete }: { message: ChatMessageDTO; onDelete:
 function VisitorSidebar({
   conversation,
   detail,
-  onChanged,
 }: {
   conversation?: ConversationDTO
   detail?: Awaited<ReturnType<typeof getPortalUserFn>> | null
-  onChanged?: () => void
 }) {
   if (!conversation) return null
   const name = conversation.visitor.displayName ?? 'Visitor'
@@ -1056,11 +1035,6 @@ function VisitorSidebar({
         </div>
       </div>
       <div className="flex flex-col gap-3 border-b border-border/50 px-4 py-3">
-        <ConversationTags
-          conversationId={conversation.id}
-          tags={conversation.tags}
-          onChanged={onChanged}
-        />
         <LinkedPosts conversationId={conversation.id} />
       </div>
       {detail && (

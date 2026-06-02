@@ -3,7 +3,7 @@
  * the SSE transport. No server-only imports here — this module is bundled into
  * the browser.
  */
-import type { ConversationId, ChatMessageId, PrincipalId, TagId } from '@quackback/ids'
+import type { ConversationId, ChatMessageId, PrincipalId } from '@quackback/ids'
 
 export type ConversationStatus = 'open' | 'snoozed' | 'pending' | 'closed'
 export type ConversationPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent'
@@ -40,13 +40,6 @@ export interface ChatAuthorDTO {
   avatarUrl: string | null
 }
 
-/** A tag applied to a conversation (id/name/color from the shared tag table). */
-export interface ChatTagDTO {
-  id: TagId
-  name: string
-  color: string
-}
-
 /** An image/file attachment ref on a message (URL from the upload pipeline). */
 export interface ChatAttachment {
   url: string
@@ -78,8 +71,6 @@ export interface ConversationDTO {
   priority: ConversationPriority
   /** The channel the conversation arrived on ('live_chat' for widget threads). */
   channel: Channel
-  /** Tags applied to the conversation; empty when none. */
-  tags: ChatTagDTO[]
   subject: string | null
   lastMessagePreview: string | null
   lastMessageAt: string
