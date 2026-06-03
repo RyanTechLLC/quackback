@@ -885,56 +885,53 @@ function AdminBubble({ message, onDelete }: { message: ChatMessageDTO; onDelete:
     )
   }
 
-  // The agent is "me": agent messages right-aligned, visitor messages left.
+  // Threaded layout: every message is left-aligned with the author's avatar +
+  // name and the content below it, whether it came from a teammate or the
+  // visitor. The avatar + name carry the "who", so no side/colour distinction.
   const isAgent = message.senderType === 'agent'
+  const authorName = message.author?.displayName ?? (isAgent ? 'Agent' : 'Visitor')
   return (
-    <div className={cn('group flex items-end gap-2', isAgent ? 'flex-row-reverse' : 'flex-row')}>
-      {!isAgent && (
-        <Avatar
-          src={message.author?.avatarUrl ?? null}
-          name={message.author?.displayName ?? 'Visitor'}
-          className="size-6 text-[10px] shrink-0"
-        />
-      )}
-      <div className={cn('flex max-w-[70%] flex-col', isAgent ? 'items-end' : 'items-start')}>
-        {message.content && (
-          <div
-            className={cn(
-              'rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap break-words',
-              isAgent
-                ? 'bg-primary text-primary-foreground rounded-br-md'
-                : 'bg-muted text-foreground rounded-bl-md'
+    <div className="group flex gap-2.5">
+      <Avatar
+        src={message.author?.avatarUrl ?? null}
+        name={authorName}
+        className="mt-0.5 size-7 shrink-0 text-[10px]"
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className="truncate text-xs font-semibold text-foreground">{authorName}</span>
+          <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground/50">
+            {message.viaEmail && (
+              <EnvelopeIcon
+                className="h-3 w-3"
+                aria-label="Received by email"
+                title="Received by email"
+              />
             )}
-          >
+            {new Date(message.createdAt).toLocaleTimeString([], {
+              hour: 'numeric',
+              minute: '2-digit',
+            })}
+          </span>
+        </div>
+        {message.content && (
+          <div className="mt-0.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
             {message.content}
           </div>
         )}
         {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} />}
-        <span className="mt-0.5 flex items-center gap-1 px-1 text-[10px] text-muted-foreground/50">
-          {message.viaEmail && (
-            <EnvelopeIcon
-              className="h-3 w-3"
-              aria-label="Received by email"
-              title="Received by email"
-            />
-          )}
-          {new Date(message.createdAt).toLocaleTimeString([], {
-            hour: 'numeric',
-            minute: '2-digit',
-          })}
-        </span>
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            className="mb-1 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
+            className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
             aria-label="Message actions"
           >
             <EllipsisVerticalIcon className="h-4 w-4" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align={isAgent ? 'end' : 'start'}>
+        <DropdownMenuContent align="end">
           <DropdownMenuItem variant="destructive" onClick={onDelete}>
             <TrashIcon className="h-4 w-4" /> Delete
           </DropdownMenuItem>
