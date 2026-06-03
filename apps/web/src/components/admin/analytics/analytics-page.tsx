@@ -7,6 +7,8 @@ import { formatDistanceToNow } from 'date-fns'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
+import { PageHeader } from '@/components/shared/page-header'
+import { FilterSection } from '@/components/shared/filter-section'
 import { cn } from '@/lib/shared/utils'
 import {
   ChartBarIcon,
@@ -75,13 +77,13 @@ export function AnalyticsPage() {
     <div className="flex h-full bg-background">
       {/* Left sidebar */}
       <aside className="hidden lg:flex w-64 xl:w-72 shrink-0 flex-col border-r border-border/50 bg-card/30 overflow-hidden">
-        <ScrollArea className="h-full">
-          <div className="p-5 space-y-0">
-            <div className="pb-4">
-              <span className="inline-block py-1 text-xs uppercase tracking-wider text-muted-foreground">
-                Sections
-              </span>
-              <div className="mt-2 space-y-1">
+        <div className="shrink-0 px-4 py-3.5">
+          <PageHeader icon={ChartBarIcon} title="Analytics" />
+        </div>
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="px-5 pb-5">
+            <FilterSection title="Sections">
+              <div className="space-y-1">
                 {sections.map(({ key, label, icon: Icon }) => (
                   <button
                     key={key}
@@ -101,7 +103,7 @@ export function AnalyticsPage() {
                   </button>
                 ))}
               </div>
-            </div>
+            </FilterSection>
           </div>
         </ScrollArea>
       </aside>

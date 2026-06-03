@@ -12,7 +12,7 @@ import {
   PencilSquareIcon,
   EnvelopeIcon,
   ChevronLeftIcon,
-} from '@heroicons/react/24/outline'
+} from '@heroicons/react/24/solid'
 import { toast } from 'sonner'
 import { isValidTypeId } from '@quackback/ids'
 import type { ConversationId, ChatMessageId, ChatTagId } from '@quackback/ids'

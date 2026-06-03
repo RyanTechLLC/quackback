@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ArrowTopRightOnSquareIcon, ChevronUpIcon } from '@heroicons/react/24/outline'
+import { ArrowTopRightOnSquareIcon, ChevronUpIcon } from '@heroicons/react/24/solid'
 import type { BoardId, ConversationId, PostId } from '@quackback/ids'
 import { convertChatToPostFn } from '@/lib/server/functions/chat'
 import { findSimilarPostsFn } from '@/lib/server/functions/public-posts'

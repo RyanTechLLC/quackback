@@ -1,4 +1,4 @@
-import { EnvelopeIcon } from '@heroicons/react/24/outline'
+import { EnvelopeIcon } from '@heroicons/react/24/solid'
 import type { Channel } from '@/lib/shared/chat/types'
 
 const LABELS: Partial<Record<Channel, string>> = {

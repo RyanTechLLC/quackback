@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { ChevronDownIcon, CheckIcon } from '@heroicons/react/24/outline'
+import { ChevronDownIcon, CheckIcon } from '@heroicons/react/24/solid'
 import { toast } from 'sonner'
 import type { ConversationId } from '@quackback/ids'
 import type { ConversationPriority } from '@/lib/shared/chat/types'

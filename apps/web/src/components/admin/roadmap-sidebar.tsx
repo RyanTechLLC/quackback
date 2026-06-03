@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { PageHeader } from '@/components/shared/page-header'
 import {
   Dialog,
   DialogContent,
@@ -125,10 +126,13 @@ export function RoadmapSidebar({ selectedRoadmapId, onSelectRoadmap }: RoadmapSi
 
   return (
     <aside className="w-64 xl:w-72 shrink-0 flex flex-col border-r border-border/50 bg-card/30 overflow-hidden">
-      {/* Header */}
-      <div className="px-5 pt-5 pb-2">
-        <div className="flex items-center justify-between py-1">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <div className="shrink-0 px-4 py-3.5">
+        <PageHeader icon={MapIcon} title="Roadmap" />
+      </div>
+      {/* Roadmap selector — matches the FilterSection subheading style. */}
+      <div className="px-5 pt-1 pb-2">
+        <div className="flex items-center justify-between">
+          <span className="py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Roadmaps
           </span>
           <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>

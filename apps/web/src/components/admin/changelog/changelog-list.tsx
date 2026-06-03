@@ -135,6 +135,8 @@ export function ChangelogList() {
   return (
     <>
       <InboxLayout
+        headerIcon={DocumentTextIcon}
+        headerTitle="Changelog"
         filters={
           <ChangelogFiltersPanel
             status={filters.status}
