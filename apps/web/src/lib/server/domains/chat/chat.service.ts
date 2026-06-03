@@ -393,11 +393,14 @@ export async function addAgentNote(
   rawContent: string,
   agent: ChatAuthorInput,
   actor: Actor,
-  contentJson?: TiptapContent | null
+  contentJson?: TiptapContent | null,
+  attachments?: ChatAttachment[]
 ): Promise<SendAgentMessageResult> {
   const decision = canActAsAgent(actor)
   if (!decision.allowed) throw new ForbiddenError('FORBIDDEN', decision.reason)
   const content = validateContent(rawContent)
+  const noteAttachments =
+    attachments && attachments.length > 0 ? attachments.slice(0, MAX_CHAT_ATTACHMENTS) : null
 
   // Sanitize on write (Layer 1), like every other TipTap-doc path (comments,
   // posts, changelog). Drops disallowed nodes/attrs + caps depth, so a tampered
@@ -419,6 +422,8 @@ export async function addAgentNote(
         content,
         // Rich doc (mention chips etc.); null for a plain-text note.
         contentJson: safeContentJson,
+        // Image/file attachments on the note (agent-only, like the note itself).
+        attachments: noteAttachments,
       })
       .returning()
     // Touch updatedAt only — internal notes don't change the visitor-facing

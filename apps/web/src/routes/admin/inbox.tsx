@@ -138,6 +138,10 @@ function buildListParams(
 function InboxPage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  // Message ids with an in-flight flag toggle (populated by the open thread's
+  // flag mutation, read by this page's SSE handler) so a concurrent
+  // message_updated broadcast can't flicker the optimistic flag away.
+  const flagPendingRef = useRef<Set<ChatMessageId>>(new Set())
   const { c: deepLinkConversationId, view: urlView, tag: urlTag } = Route.useSearch()
   const [status, setStatus] = useState<StatusFilter>('open')
   const [priorityFilter, setPriorityFilter] = useState<ConversationPriority | 'all'>('all')
@@ -277,7 +281,9 @@ function InboxPage() {
               ? {
                   ...prev,
                   messages: prev.messages.map((m) =>
-                    m.id === evt.message.id ? mergeAgentMessage(m, evt.message) : m
+                    m.id === evt.message.id
+                      ? mergeAgentMessage(m, evt.message, flagPendingRef.current.has(m.id))
+                      : m
                   ),
                 }
               : prev
@@ -333,6 +339,7 @@ function InboxPage() {
             onSelectConversation={setSelectedId}
             isVisitorTyping={visitorTyping}
             isOtherAgentTyping={otherAgentTyping}
+            flagPendingRef={flagPendingRef}
           />
         ) : (
           <div className="hidden h-full items-center justify-center md:flex">
@@ -367,15 +374,20 @@ function asAgentMessage(m: ChatMessageDTO | AgentChatMessageDTO): AgentChatMessa
 
 /** Apply an incoming message_updated to a cached message: take its reaction
  *  counts + flag state, but keep OUR own hasReacted (the broadcast carries the
- *  acting agent's perspective, not the recipient's). */
+ *  acting agent's perspective, not the recipient's). When a local flag toggle is
+ *  still in flight (`preserveLocalFlag`), keep the optimistic flaggedAt too — a
+ *  concurrent reaction broadcast from another agent carries a pre-write flag
+ *  value that would otherwise flicker our pending flag away. */
 function mergeAgentMessage(
   local: AgentChatMessageDTO,
-  incoming: AgentChatMessageDTO
+  incoming: AgentChatMessageDTO,
+  preserveLocalFlag: boolean
 ): AgentChatMessageDTO {
   const localReacted = new Set(local.reactions.filter((r) => r.hasReacted).map((r) => r.emoji))
   return {
     ...incoming,
     reactions: incoming.reactions.map((r) => ({ ...r, hasReacted: localReacted.has(r.emoji) })),
+    flaggedAt: preserveLocalFlag ? local.flaggedAt : incoming.flaggedAt,
   }
 }
 
@@ -414,6 +426,7 @@ function ChatThread({
   onSelectConversation,
   isVisitorTyping,
   isOtherAgentTyping,
+  flagPendingRef,
 }: {
   conversationId: ConversationId
   onChanged: () => void
@@ -423,6 +436,9 @@ function ChatThread({
   onSelectConversation: (id: ConversationId) => void
   isVisitorTyping: boolean
   isOtherAgentTyping: boolean
+  /** Shared with the parent's SSE handler: message ids with an in-flight flag
+   *  toggle, so a concurrent message_updated broadcast can't flicker the flag. */
+  flagPendingRef: React.MutableRefObject<Set<ChatMessageId>>
 }) {
   const queryClient = useQueryClient()
   const threadKey = ['admin', 'inbox', 'thread', conversationId] as const
@@ -552,11 +568,23 @@ function ChatThread({
   })
 
   const noteMutation = useMutation({
-    mutationFn: (vars: { content: string; contentJson: JSONContent | null }) =>
+    mutationFn: (vars: {
+      content: string
+      contentJson: JSONContent | null
+      attachments?: ChatAttachment[]
+    }) =>
       addChatNoteFn({
-        data: { conversationId, content: vars.content, contentJson: vars.contentJson },
+        data: {
+          conversationId,
+          content: vars.content,
+          contentJson: vars.contentJson,
+          attachments: vars.attachments,
+        },
       }),
-    onSuccess: appendToThread,
+    onSuccess: (res) => {
+      clearAttachments()
+      appendToThread(res)
+    },
     onError: () => toast.error('Failed to add note'),
   })
 
@@ -610,6 +638,7 @@ function ChatThread({
     mutationFn: (vars: { messageId: ChatMessageId; flagged: boolean }) =>
       setMessageFlagFn({ data: { messageId: vars.messageId, flagged: vars.flagged } }),
     onMutate: (vars) => {
+      flagPendingRef.current.add(vars.messageId)
       queryClient.setQueryData(threadKey, (prev: ThreadCache | undefined) =>
         prev
           ? {
@@ -630,6 +659,7 @@ function ChatThread({
       toast.error('Failed to update flag')
       void queryClient.invalidateQueries({ queryKey: threadKey })
     },
+    onSettled: (_r, _e, vars) => flagPendingRef.current.delete(vars.messageId),
   })
 
   // Mark the conversation unread from a message. onChanged refreshes the inbox
@@ -656,11 +686,15 @@ function ChatThread({
 
   const onSend = useCallback(() => {
     if (noteMode) {
-      // Notes are rich (mention chips) but attachment-free. The plain text gates
-      // the send + drives the preview; the doc carries the mentions.
+      // Notes are rich (mention chips in the doc) and can carry attachments. The
+      // plain text gates the send + drives the preview; the doc carries mentions.
       const text = noteText.trim()
-      if (!text || noteMutation.isPending) return
-      noteMutation.mutate({ content: text, contentJson: noteDocRef.current })
+      if (!text || noteMutation.isPending || uploading) return
+      noteMutation.mutate({
+        content: text,
+        contentJson: noteDocRef.current,
+        attachments: pendingAttachments.length > 0 ? pendingAttachments : undefined,
+      })
       setNoteText('')
       noteDocRef.current = null
       setNoteResetSignal((n) => n + 1)
@@ -829,7 +863,7 @@ function ChatThread({
               </button>
             ))}
           </div>
-          {!noteMode && pendingAttachments.length > 0 && (
+          {pendingAttachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 px-1 pb-2">
               {pendingAttachments.map((a, i) => {
                 const isImage = a.contentType?.startsWith('image/') && a.url
@@ -916,17 +950,16 @@ function ChatThread({
               />
             )}
             <div className="flex items-center gap-0.5 pt-1">
-              {!noteMode && (
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
-                  className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-                  aria-label="Attach image"
-                >
-                  <PaperClipIcon className="h-4 w-4" />
-                </button>
-              )}
+              {/* Attach is available in both reply and note mode. */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                aria-label="Attach image"
+              >
+                <PaperClipIcon className="h-4 w-4" />
+              </button>
               {!noteMode && (
                 <EmojiPicker
                   className="size-8"

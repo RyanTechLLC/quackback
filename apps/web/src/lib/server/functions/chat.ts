@@ -94,6 +94,8 @@ const agentNoteSchema = z.object({
   // TipTap doc from the note editor (carries @-mention nodes). Validated +
   // mention-extracted server-side; omitted for a plain-text note.
   contentJson: z.unknown().nullable().optional(),
+  // Image/file attachments on the note (agent-only, same pipeline as replies).
+  attachments: z.array(attachmentSchema).max(MAX_CHAT_ATTACHMENTS).optional(),
 })
 
 const setStatusSchema = z.object({
@@ -617,7 +619,8 @@ export const addChatNoteFn = createServerFn({ method: 'POST' })
           avatarUrl: ctx.user.image,
         },
         actor,
-        (data.contentJson ?? null) as import('@/lib/shared/db-types').TiptapContent | null
+        (data.contentJson ?? null) as import('@/lib/shared/db-types').TiptapContent | null,
+        data.attachments as ChatAttachment[] | undefined
       )
     } catch (error) {
       console.error('[fn:chat] addChatNoteFn failed:', error)

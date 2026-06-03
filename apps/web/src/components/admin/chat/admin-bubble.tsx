@@ -76,37 +76,11 @@ export function AdminBubble({
     )
   }
 
-  // Internal notes are agent-only — rendered as a distinct full-width note.
-  if (message.isInternal) {
-    return (
-      <div className="group relative rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm">
-        <div className="mb-0.5 flex items-center gap-1.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
-          <PencilSquareIcon className="h-3 w-3" />
-          {message.author?.displayName ?? 'Teammate'} · Internal note
-        </div>
-        <NoteContent
-          content={message.content}
-          contentJson={message.contentJson}
-          className="text-foreground/90"
-        />
-        <span className="mt-0.5 block text-[10px] text-muted-foreground/50">
-          {timeLabel(message.createdAt)}
-        </span>
-        <button
-          type="button"
-          onClick={onDelete}
-          className="absolute right-1.5 top-1.5 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-amber-400/20 group-hover:opacity-100"
-          aria-label="Delete note"
-        >
-          <TrashIcon className="h-3.5 w-3.5" />
-        </button>
-      </div>
-    )
-  }
-
-  // Threaded message: avatar + name on top, content below; a hover toolbar with
-  // reactions, flag, and an overflow menu (mark-unread / delete). A flagged
-  // message gets a tinted row + a flag marker under the avatar.
+  // Visitor messages, agent replies, and internal notes all share one threaded
+  // layout + hover toolbar (reactions, flag, mark-unread, delete). An internal
+  // note keeps its agent-only distinction via an amber tint + an "Internal note"
+  // badge and renders its rich TipTap body, but otherwise behaves identically.
+  const isNote = message.isInternal
   const isAgent = message.senderType === 'agent'
   const authorName = message.author?.displayName ?? (isAgent ? 'Agent' : 'Visitor')
   const isFlagged = message.flaggedAt !== null
@@ -116,7 +90,11 @@ export function AdminBubble({
     <div
       className={cn(
         'group relative -mx-2 flex gap-2.5 rounded-md px-2 py-1 transition-colors',
-        isFlagged ? 'bg-amber-500/10 hover:bg-amber-500/15' : 'hover:bg-muted/40'
+        isFlagged
+          ? 'bg-amber-500/10 hover:bg-amber-500/15'
+          : isNote
+            ? 'bg-amber-400/5 hover:bg-amber-400/10'
+            : 'hover:bg-muted/40'
       )}
     >
       {/* Left gutter: avatar + (when flagged) a solid flag marker beneath it. */}
@@ -132,8 +110,13 @@ export function AdminBubble({
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
+        <div className="flex items-center gap-2">
           <span className="truncate text-xs font-semibold text-foreground">{authorName}</span>
+          {isNote && (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded bg-amber-400/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+              <PencilSquareIcon className="h-3 w-3" /> Internal note
+            </span>
+          )}
           <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground/50">
             {message.viaEmail && (
               <EnvelopeIcon
@@ -145,10 +128,18 @@ export function AdminBubble({
             {timeLabel(message.createdAt)}
           </span>
         </div>
-        {message.content && (
-          <div className="mt-0.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
-            {message.content}
-          </div>
+        {isNote ? (
+          <NoteContent
+            content={message.content}
+            contentJson={message.contentJson}
+            className="mt-0.5 text-sm text-foreground/90"
+          />
+        ) : (
+          message.content && (
+            <div className="mt-0.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
+              {message.content}
+            </div>
+          )
         )}
         {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} />}
         {message.reactions.length > 0 && (
@@ -157,6 +148,7 @@ export function AdminBubble({
               <button
                 key={r.emoji}
                 type="button"
+                aria-pressed={r.hasReacted}
                 onClick={() => onToggleReaction(r.emoji, r.hasReacted)}
                 className={cn(
                   'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs transition-colors',
@@ -198,11 +190,16 @@ export function AdminBubble({
                   <button
                     key={emoji}
                     type="button"
+                    aria-label={`React with ${emoji}`}
+                    aria-pressed={has}
                     onClick={() => {
                       onToggleReaction(emoji, has)
                       setEmojiOpen(false)
                     }}
-                    className="flex size-8 items-center justify-center rounded text-lg leading-none hover:bg-muted"
+                    className={cn(
+                      'flex size-8 items-center justify-center rounded text-lg leading-none hover:bg-muted',
+                      has && 'bg-primary/10'
+                    )}
                   >
                     {emoji}
                   </button>
@@ -220,6 +217,7 @@ export function AdminBubble({
             isFlagged ? 'text-amber-500' : 'text-muted-foreground hover:text-foreground'
           )}
           aria-label={isFlagged ? 'Remove flag' : 'Flag message'}
+          aria-pressed={isFlagged}
         >
           {isFlagged ? <FlagSolidIcon className="h-4 w-4" /> : <FlagIcon className="h-4 w-4" />}
         </button>
