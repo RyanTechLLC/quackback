@@ -86,28 +86,6 @@ export function WidgetShell({
   const tabsToShow = visibleTabs(enabledTabs)
   const showTabBar = tabsToShow.length > 1
   const { user, isIdentified, hmacRequired, closeWidget } = useWidgetAuth()
-  const isNative =
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('source') === 'native'
-  const showCloseExplicit =
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('showClose') === '1'
-  // The widget runs in a ~400px iframe on desktop, so window.innerWidth is
-  // unreliable for mobile detection. screen.width gives the actual device
-  // screen width regardless of iframe size. The parent SDK also sends
-  // 'quackback:mobile' on resize for the embedded case.
-  const [parentIsMobile, setParentIsMobile] = useState(false)
-  useEffect(() => {
-    function handleMobileMsg(event: MessageEvent) {
-      if (event.data?.type === 'quackback:mobile') {
-        setParentIsMobile(!!event.data.data)
-      }
-    }
-    window.addEventListener('message', handleMobileMsg)
-    return () => window.removeEventListener('message', handleMobileMsg)
-  }, [])
-  const deviceIsMobile = typeof window !== 'undefined' && window.screen.width < 640
-  const showCloseButton = showCloseExplicit || isNative || parentIsMobile || deviceIsMobile
 
   // Global Escape key handler — close widget from anywhere
   useEffect(() => {
@@ -147,22 +125,32 @@ export function WidgetShell({
 
   return (
     <div className="flex flex-col h-full bg-background text-foreground overflow-x-hidden">
-      <div className="flex items-center justify-between px-3 pt-2 pb-0.5 shrink-0">
-        <div className="flex items-center gap-1">
-          {onBack ? (
+      <div className="flex items-center gap-2 px-4 py-3 shrink-0">
+        {/* Left zone: back button on detail views (empty on root tabs so the
+            flanking flex-1 zones keep the centered title dead-center). */}
+        <div className="flex flex-1 items-center gap-1 min-w-0">
+          {onBack && (
             <button
               type="button"
               onClick={onBack}
-              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-muted transition-colors"
+              className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted transition-colors"
               aria-label={intl.formatMessage({
                 id: 'widget.shell.aria.goBack',
                 defaultMessage: 'Go back',
               })}
             >
-              <ArrowLeftIcon className="w-4 h-4 text-muted-foreground" />
+              <ArrowLeftIcon className="w-5 h-5 text-muted-foreground" />
             </button>
-          ) : activeTab === 'home' ? null : (
-            <h2 className="text-sm font-semibold text-foreground ps-0.5">
+          )}
+        </div>
+
+        {/* Center: the tab title gets its own flex-1 zone so it stays
+            dead-center no matter how much sits in the right zone (CTA / avatar /
+            close). Detail views (with a back button) render their own heading in
+            the body, so the title is suppressed there. */}
+        <div className="flex flex-1 min-w-0 items-center justify-center">
+          {!onBack && activeTab !== 'home' && (
+            <h2 className="min-w-0 truncate text-center text-base font-semibold text-foreground">
               {activeTab === 'feedback' ? (
                 <FormattedMessage
                   id="widget.shell.heading.feedback"
@@ -176,12 +164,14 @@ export function WidgetShell({
             </h2>
           )}
         </div>
-        <div className="flex items-center gap-1">
+
+        {/* Right zone: portal CTA, user menu, and the always-present close. */}
+        <div className="flex flex-1 items-center justify-end gap-1 min-w-0">
           {showPortalCta && (
             <button
               type="button"
               onClick={handleGoToPortal}
-              className="flex items-center gap-1 px-2 h-7 rounded-md text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
+              className="flex items-center gap-1 px-2 h-8 rounded-md text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
               aria-label={intl.formatMessage({
                 id: 'widget.shell.aria.goToPortal',
                 defaultMessage: 'Go to portal',
@@ -192,24 +182,22 @@ export function WidgetShell({
             </button>
           )}
           {user && <UserAvatarPopover user={user} />}
-          {showCloseButton && (
-            <button
-              type="button"
-              onClick={closeWidget}
-              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-muted transition-colors"
-              aria-label={intl.formatMessage({
-                id: 'widget.shell.aria.close',
-                defaultMessage: 'Close feedback widget',
-              })}
-            >
-              <XMarkIcon className="w-4 h-4 text-muted-foreground" />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={closeWidget}
+            className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted transition-colors"
+            aria-label={intl.formatMessage({
+              id: 'widget.shell.aria.close',
+              defaultMessage: 'Close feedback widget',
+            })}
+          >
+            <XMarkIcon className="w-5 h-5 text-muted-foreground" />
+          </button>
         </div>
       </div>
 
       {portalCtaError && (
-        <p className="px-3 pb-1 text-[11px] text-destructive">
+        <p className="px-4 pb-1 text-[11px] text-destructive">
           <FormattedMessage
             id="widget.shell.goToPortal.error"
             defaultMessage="Couldn't generate sign-in link, please try again"
@@ -304,13 +292,13 @@ function UserAvatarPopover({
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="w-7 h-7 flex items-center justify-center rounded-full hover:ring-2 hover:ring-primary/20 transition-all"
+        className="flex h-8 w-8 items-center justify-center rounded-full hover:ring-2 hover:ring-primary/20 transition-all"
         aria-label={intl.formatMessage({
           id: 'widget.shell.aria.userMenu',
           defaultMessage: 'User menu',
         })}
       >
-        <Avatar src={user.avatarUrl} name={user.name} className="size-7 text-[10px]" />
+        <Avatar src={user.avatarUrl} name={user.name} className="size-8 text-[10px]" />
       </button>
 
       {open && (
