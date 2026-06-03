@@ -488,7 +488,9 @@ export async function listConversationsForAgent(
           : undefined,
         // Mentions view: conversations carrying an internal note that @-mentions
         // this principal. A DISTINCT subquery over chat_message_mentions →
-        // chat_messages keeps the outer select shape (conversations only).
+        // chat_messages keeps the outer select shape (conversations only). Guard
+        // on deleted_at IS NULL — mention rows outlive a note's soft-delete (the
+        // FK only cascades on hard delete) — and isInternal as defense-in-depth.
         filter.mentionedPrincipalId
           ? inArray(
               conversations.id,
@@ -496,7 +498,13 @@ export async function listConversationsForAgent(
                 .selectDistinct({ id: chatMessages.conversationId })
                 .from(chatMessageMentions)
                 .innerJoin(chatMessages, eq(chatMessageMentions.chatMessageId, chatMessages.id))
-                .where(eq(chatMessageMentions.principalId, filter.mentionedPrincipalId))
+                .where(
+                  and(
+                    eq(chatMessageMentions.principalId, filter.mentionedPrincipalId),
+                    isNull(chatMessages.deletedAt),
+                    eq(chatMessages.isInternal, true)
+                  )
+                )
             )
           : undefined,
         beforeDate ? lt(conversations.lastMessageAt, beforeDate) : undefined

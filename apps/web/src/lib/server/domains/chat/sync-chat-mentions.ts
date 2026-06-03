@@ -71,18 +71,6 @@ export async function syncChatMessageMentions(input: SyncChatMentionsInput): Pro
     const toNotify = inserted.map((r) => r.principalId).filter((id) => id !== authorPrincipalId)
     if (toNotify.length === 0) return
 
-    // Record that these rows have been alerted on (immutable notes never
-    // re-sync, but keep the field meaningful + mirror the post path).
-    await db
-      .update(chatMessageMentions)
-      .set({ notifiedAt: new Date() })
-      .where(
-        and(
-          eq(chatMessageMentions.chatMessageId, chatMessageId),
-          inArray(chatMessageMentions.principalId, toNotify)
-        )
-      )
-
     await createNotificationsBatch(
       toNotify.map((principalId) => ({
         principalId,
@@ -92,6 +80,19 @@ export async function syncChatMessageMentions(input: SyncChatMentionsInput): Pro
         metadata: { conversationId },
       }))
     )
+
+    // Stamp notifiedAt only AFTER delivery — if the batch above throws, the
+    // catch leaves these rows un-watermarked, so the field never claims an
+    // alert that didn't happen.
+    await db
+      .update(chatMessageMentions)
+      .set({ notifiedAt: new Date() })
+      .where(
+        and(
+          eq(chatMessageMentions.chatMessageId, chatMessageId),
+          inArray(chatMessageMentions.principalId, toNotify)
+        )
+      )
   } catch (err) {
     console.warn('[chat:notify] syncChatMessageMentions failed:', (err as Error).message)
   }

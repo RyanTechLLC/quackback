@@ -294,4 +294,12 @@ describe('listConversationsForAgent mentions view', () => {
     await listConversationsForAgent({})
     expect(eqCalledWithPrincipal()).toBe(false)
   })
+
+  it('excludes soft-deleted notes from the mentions subquery', async () => {
+    // Mention rows survive a note's soft-delete (the FK only cascades on hard
+    // delete), so the subquery must guard on deleted_at IS NULL or a deleted
+    // note keeps the conversation in Mentions forever.
+    await listConversationsForAgent({ mentionedPrincipalId: agentId })
+    expect(isNull).toHaveBeenCalled()
+  })
 })

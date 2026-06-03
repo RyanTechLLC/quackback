@@ -182,10 +182,40 @@ describe('addAgentNote', () => {
     expect(arg.authorPrincipalId).toBe(agent.principalId)
   })
 
+  it('persists mentions BEFORE announcing the note (so a teammate refetch sees them)', async () => {
+    // The inbox event triggers a Mentions-view refetch on every agent; if the
+    // mention rows aren't written yet that refetch misses the new mention until
+    // the next poll. Persist first, then publish.
+    await addAgentNote(conversationId, 'ping', agent, agentActor, {
+      type: 'doc',
+      content: [{ type: 'paragraph' }],
+    })
+    expect(syncChatMessageMentions).toHaveBeenCalled()
+    expect(publishAgentChatEvent).toHaveBeenCalled()
+    expect(syncChatMessageMentions.mock.invocationCallOrder[0]).toBeLessThan(
+      publishAgentChatEvent.mock.invocationCallOrder[0]
+    )
+  })
+
   it('persists the note rich doc as contentJson', async () => {
     const doc = { type: 'doc', content: [{ type: 'paragraph' }] }
     await addAgentNote(conversationId, 'hi', agent, agentActor, doc)
     expect(insertedMessages[0]).toMatchObject({ isInternal: true, contentJson: doc })
+  })
+
+  it('sanitizes the note doc before storing it (strips disallowed nodes)', async () => {
+    // Notes are the one TipTap-doc write path; like comments/posts it must run
+    // the Layer-1 sanitizer so a tampered client can't store hostile nodes.
+    const doc = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'hi' }] },
+        { type: 'evilCustomNode', attrs: { onclick: 'steal()' } },
+      ],
+    }
+    await addAgentNote(conversationId, 'hi', agent, agentActor, doc)
+    const stored = insertedMessages[0].contentJson as { content: { type: string }[] }
+    expect(stored.content.some((n) => n.type === 'evilCustomNode')).toBe(false)
   })
 
   it('refuses a non-agent actor before any write', async () => {

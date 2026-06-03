@@ -57,6 +57,7 @@ import { notifyVisitorMessage, notifyAgentReply } from './chat.notify'
 import { conversationToDTO, toMessageDTO, authorFromInput } from './chat.query'
 import { extractMentions } from '@/lib/server/domains/posts/extract-mentions'
 import { syncChatMessageMentions } from './sync-chat-mentions'
+import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
 import type { TiptapContent } from '@/lib/shared/db-types'
 import type {
   ChatAuthorInput,
@@ -397,6 +398,12 @@ export async function addAgentNote(
   if (!decision.allowed) throw new ForbiddenError('FORBIDDEN', decision.reason)
   const content = validateContent(rawContent)
 
+  // Sanitize on write (Layer 1), like every other TipTap-doc path (comments,
+  // posts, changelog). Drops disallowed nodes/attrs + caps depth, so a tampered
+  // client can't store hostile JSON — and mentions are extracted from the same
+  // clean tree below.
+  const safeContentJson = contentJson ? sanitizeTiptapContent(contentJson) : null
+
   await loadConversationOr404(conversationId)
   // Insert + touch in one transaction so a note can't persist without its
   // updatedAt bump.
@@ -410,7 +417,7 @@ export async function addAgentNote(
         isInternal: true,
         content,
         // Rich doc (mention chips etc.); null for a plain-text note.
-        contentJson: contentJson ?? null,
+        contentJson: safeContentJson,
       })
       .returning()
     // Touch updatedAt only — internal notes don't change the visitor-facing
@@ -423,20 +430,25 @@ export async function addAgentNote(
   })
 
   const messageDTO = toMessageDTO(message, authorFromInput(agent))
-  // Agent inbox only — the visitor's conversation channel never receives it.
-  publishAgentChatEvent({ kind: 'message', conversationId, message: messageDTO })
 
-  // Persist @-mentions from the note doc + alert the mentioned teammates. The
-  // doc is the single source of truth for who was mentioned (the picker writes
-  // principal ids into mention nodes), validated server-side in the sync.
-  void syncChatMessageMentions({
+  // Persist @-mentions from the note doc + alert the mentioned teammates BEFORE
+  // announcing the note: the inbox event makes every agent's Mentions view
+  // refetch, so the rows must already exist or the new mention is missed until
+  // the next poll. The doc is the single source of truth for who was mentioned
+  // (the picker writes principal ids into mention nodes), validated server-side
+  // in the sync. The sync is DB-only + non-throwing, so awaiting it can't fail
+  // the note send and adds only a few ms (no email/network like the reply path).
+  await syncChatMessageMentions({
     chatMessageId: message.id,
     conversationId,
-    mentionedIds: extractMentions(contentJson),
+    mentionedIds: extractMentions(safeContentJson),
     authorPrincipalId: agent.principalId,
     authorName: agent.displayName ?? 'A teammate',
     content,
   })
+
+  // Agent inbox only — the visitor's conversation channel never receives it.
+  publishAgentChatEvent({ kind: 'message', conversationId, message: messageDTO })
 
   // Reload so the published DTO reflects current status/assignment rather
   // than the pre-write snapshot (the admin client replaces its cached

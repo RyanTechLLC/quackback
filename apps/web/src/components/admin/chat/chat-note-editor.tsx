@@ -3,7 +3,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import type { Editor, JSONContent } from '@tiptap/core'
-import { MentionExtension } from '@/components/ui/mention-extension'
+import { TeamMentionExtension } from '@/components/ui/mention-extension'
 import { hasActiveSuggestion } from '@/components/ui/rich-text-editor'
 import { cn } from '@/lib/shared/utils'
 
@@ -22,9 +22,10 @@ interface ChatNoteEditorProps {
 
 /**
  * A minimal, isolated TipTap editor for the internal-note composer — just
- * enough to support @-mention chips (reusing the shared MentionExtension +
- * picker + /api/v1/mentions/suggest). Visitor-facing replies stay a plain
- * textarea; only notes are rich.
+ * enough to support @-mention chips (reusing the shared mention picker +
+ * /api/v1/mentions/suggest, scoped team-only via TeamMentionExtension since a
+ * note mention is team-internal). Visitor-facing replies stay a plain textarea;
+ * only notes are rich.
  *
  * Enter submits, Shift+Enter inserts a line break — except while the mention
  * picker is open, where Enter selects the highlighted teammate. We defer to the
@@ -59,7 +60,7 @@ export function ChatNoteEditor({
         placeholder: placeholder ?? 'Add an internal note for your team…',
         emptyEditorClass: 'is-editor-empty',
       }),
-      MentionExtension,
+      TeamMentionExtension,
     ],
     editorProps: {
       attributes: {

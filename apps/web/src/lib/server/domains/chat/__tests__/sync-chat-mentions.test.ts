@@ -194,5 +194,8 @@ describe('syncChatMessageMentions', () => {
     await expect(
       syncChatMessageMentions(defaultInput({ mentionedIds: new Set([P1]) }))
     ).resolves.toBeUndefined()
+    // notifiedAt is stamped only after delivery, so a failed batch leaves the
+    // rows un-watermarked rather than claiming an alert that never landed.
+    expect(updateNotifiedCalls).toHaveLength(0)
   })
 })
