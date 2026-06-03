@@ -31,6 +31,7 @@ import { NotificationBell } from '@/components/notifications'
 import { cn } from '@/lib/shared/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { LatestVersionResult } from '@/lib/server/functions/version'
+import type { SettingsBrandingData } from '@/lib/server/domains/settings/settings.types'
 import { setAgentAvailabilityFn } from '@/lib/server/functions/chat'
 
 /** Availability toggle for the account menu (chat routing). The label shows the
@@ -117,6 +118,11 @@ export function AdminSidebar({ initialUserData, latestVersion }: AdminSidebarPro
   const flags = settings?.featureFlags as
     | { analytics?: boolean; helpCenter?: boolean; supportInbox?: boolean }
     | undefined
+  // The org's own logo (resolved in brandingData by the root loader, same source
+  // PortalBrandMark uses); fall back to the Quackback mark when none is set.
+  const branding = (settings as { brandingData?: SettingsBrandingData } | undefined)?.brandingData
+  const orgLogo = branding?.logoUrl ?? branding?.headerLogoUrl ?? '/logo.png'
+  const orgName = branding?.name ?? 'Quackback'
 
   const filteredNavItems = navItems.filter((item) => {
     if (item.href === '/admin/analytics') return flags?.analytics ?? false
@@ -163,7 +169,13 @@ export function AdminSidebar({ initialUserData, latestVersion }: AdminSidebarPro
               to="/admin/feedback"
               className="flex items-center justify-center mb-8 opacity-90 hover:opacity-100 transition-opacity"
             >
-              <img src="/logo.png" alt="Quackback" width={28} height={28} className="rounded" />
+              <img
+                src={orgLogo}
+                alt={orgName}
+                width={28}
+                height={28}
+                className="h-7 w-7 rounded object-contain"
+              />
             </Link>
 
             {/* Main Navigation */}
@@ -330,7 +342,13 @@ export function AdminSidebar({ initialUserData, latestVersion }: AdminSidebarPro
             <SheetHeader className="px-5 pt-6 pb-4">
               <SheetTitle className="flex items-center gap-3">
                 <Link to="/admin/feedback" onClick={() => setMobileMenuOpen(false)}>
-                  <img src="/logo.png" alt="Quackback" width={28} height={28} className="rounded" />
+                  <img
+                    src={orgLogo}
+                    alt={orgName}
+                    width={28}
+                    height={28}
+                    className="h-7 w-7 rounded object-contain"
+                  />
                 </Link>
                 <span className="text-base font-semibold">Quackback</span>
               </SheetTitle>
@@ -414,7 +432,13 @@ export function AdminSidebar({ initialUserData, latestVersion }: AdminSidebarPro
         </Sheet>
 
         <Link to="/admin/feedback" className="absolute left-1/2 -translate-x-1/2">
-          <img src="/logo.png" alt="Quackback" width={28} height={28} className="rounded" />
+          <img
+            src={orgLogo}
+            alt={orgName}
+            width={28}
+            height={28}
+            className="h-7 w-7 rounded object-contain"
+          />
         </Link>
 
         <div className="flex items-center gap-1">
