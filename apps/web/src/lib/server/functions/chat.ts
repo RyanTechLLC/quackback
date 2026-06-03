@@ -207,32 +207,24 @@ export const getMyChatFn = createServerFn({ method: 'GET' }).handler(async () =>
     const { getSettings } = await import('./workspace')
     const { isEmailConfigured } = await import('@quackback/email')
     const { canEmailVisitor } = await import('@/lib/shared/chat/reply-capability')
-    const { isAnyAgentAvailable } = await import('@/lib/server/realtime/presence')
-    // Presence is tenant-global (needs no principal), so resolve it up front and
-    // report it on EVERY return path — including the not-yet-authenticated early
-    // returns. Otherwise a fresh visitor reads the team as "away" until the next
-    // poll even when an agent is online.
-    const [enabled, liveChatConfig, appSettings, agentsOnline] = await Promise.all([
+    const [enabled, liveChatConfig, appSettings] = await Promise.all([
       isLiveChatEnabled(),
       getLiveChatConfig(),
       getSettings(),
-      isAnyAgentAvailable(),
     ])
     const preChatEmail = liveChatConfig.preChatEmail ?? 'off'
     const emailConfigured = isEmailConfigured()
+    // Note: team-availability presence is NOT returned here. The widget reads it
+    // from the shared useChatPresence query (getChatPresenceFn) so every surface
+    // agrees and only one poll runs — this fn is just the visitor's thread.
     const base = {
       enabled,
-      agentsOnline,
       welcomeMessage: liveChatConfig.welcomeMessage ?? null,
       offlineMessage: liveChatConfig.offlineMessage ?? null,
       // Falls back to the workspace name (as the settings help text promises)
       // when no team name is set.
       teamName: liveChatConfig.teamName?.trim() || appSettings?.name || null,
       preChatEmail,
-      // withinOfficeHours: null = no schedule (widget falls back to live agent
-      // presence); true/false = the schedule's verdict. nextOpenAt is the ISO
-      // instant we're next back, set only when the schedule says we're closed.
-      ...officeHoursSnapshot(liveChatConfig.officeHours, new Date()),
       // Whether we already have a contact email — the widget skips the pre-chat
       // prompt when true.
       visitorHasEmail: false,

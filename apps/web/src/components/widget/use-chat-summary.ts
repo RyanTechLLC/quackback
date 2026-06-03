@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useWidgetAuth } from './widget-auth-provider'
 import { getWidgetAuthHeaders } from '@/lib/client/widget-auth'
-import { getMyChatFn, getChatPresenceFn } from '@/lib/server/functions/chat'
+import { getMyChatFn } from '@/lib/server/functions/chat'
 import type { ConversationDTO } from '@/lib/shared/chat/types'
-import { CHAT_PRESENCE_POLL_MS, type ChatPresence } from '@/lib/shared/chat/presence'
+import { useChatPresence } from './use-chat-presence'
 
 export interface ChatSummary {
   conversation: ConversationDTO | null
@@ -12,35 +12,27 @@ export interface ChatSummary {
   withinOfficeHours: boolean | null
 }
 
-const EMPTY: ChatSummary = {
-  conversation: null,
-  teamName: null,
-  agentsOnline: false,
-  withinOfficeHours: null,
-}
-
 /**
- * Lightweight read of the visitor's chat summary (most-recent conversation +
- * presence) from getMyChatFn, re-keyed on sessionVersion. Shared by the Home
- * overview and the Help Messages section so the resume card and presence stay
- * consistent across both. Pass `enabled=false` (e.g. when chat is off) to skip
- * the fetch entirely. `initialPresence` (SSR-seeded) makes the online/offline
- * verdict correct on first paint, before the client fetch resolves.
+ * Lightweight read of the visitor's chat summary: the most-recent conversation
+ * (+ team name) from getMyChatFn, merged with the shared presence verdict from
+ * useChatPresence. Re-keyed on sessionVersion. Shared by the Home overview and
+ * the Help Messages section so the resume card and presence stay consistent.
+ * Pass `enabled=false` (e.g. when chat is off) to skip the fetch entirely.
+ *
+ * Presence is NOT fetched here — it lives in the one shared useChatPresence
+ * query (SSR-seeded, polled once), so every surface reads the same value.
  */
-export function useChatSummary(
-  enabled: boolean,
-  initialPresence?: ChatPresence | null
-): ChatSummary {
+export function useChatSummary(enabled: boolean): ChatSummary {
   const { sessionVersion } = useWidgetAuth()
-  const [summary, setSummary] = useState<ChatSummary>(() => ({
-    ...EMPTY,
-    agentsOnline: initialPresence?.agentsOnline ?? false,
-    withinOfficeHours: initialPresence?.withinOfficeHours ?? null,
-  }))
+  const presence = useChatPresence(enabled)
+  const [thread, setThread] = useState<{
+    conversation: ConversationDTO | null
+    teamName: string | null
+  }>({ conversation: null, teamName: null })
 
   useEffect(() => {
     if (!enabled) {
-      setSummary(EMPTY)
+      setThread({ conversation: null, teamName: null })
       return
     }
     let cancelled = false
@@ -48,12 +40,7 @@ export function useChatSummary(
       try {
         const res = await getMyChatFn({ headers: getWidgetAuthHeaders() })
         if (cancelled) return
-        setSummary({
-          conversation: res.conversation ?? null,
-          teamName: res.teamName,
-          agentsOnline: res.agentsOnline,
-          withinOfficeHours: res.withinOfficeHours,
-        })
+        setThread({ conversation: res.conversation ?? null, teamName: res.teamName })
       } catch {
         /* not signed in / no conversation — keep defaults */
       }
@@ -63,28 +50,10 @@ export function useChatSummary(
     }
   }, [enabled, sessionVersion])
 
-  // Keep the online/offline indicator fresh while the widget is open by polling
-  // the lightweight presence endpoint (the initial load already seeded it).
-  useEffect(() => {
-    if (!enabled) return
-    let cancelled = false
-    const id = setInterval(() => {
-      void getChatPresenceFn({ headers: getWidgetAuthHeaders() })
-        .then((p) => {
-          if (cancelled) return
-          setSummary((prev) => ({
-            ...prev,
-            agentsOnline: p.agentsOnline,
-            withinOfficeHours: p.withinOfficeHours,
-          }))
-        })
-        .catch(() => {})
-    }, CHAT_PRESENCE_POLL_MS)
-    return () => {
-      cancelled = true
-      clearInterval(id)
-    }
-  }, [enabled, sessionVersion])
-
-  return summary
+  return {
+    conversation: thread.conversation,
+    teamName: thread.teamName,
+    agentsOnline: presence.agentsOnline,
+    withinOfficeHours: presence.withinOfficeHours,
+  }
 }

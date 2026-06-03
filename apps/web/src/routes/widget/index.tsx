@@ -29,7 +29,7 @@ import { portalQueries } from '@/lib/client/queries/portal'
 import { fetchBoardCapabilitiesFn } from '@/lib/server/functions/portal'
 import { getWidgetAuthHeaders } from '@/lib/client/widget-auth'
 import { widgetQueryKeys, INITIAL_SESSION_VERSION } from '@/lib/client/hooks/use-widget-vote'
-import type { ChatPresence } from '@/lib/shared/chat/presence'
+import { CHAT_PRESENCE_QUERY_KEY } from '@/components/widget/use-chat-presence'
 
 const searchSchema = z.object({
   board: z.string().optional(),
@@ -67,26 +67,25 @@ export const Route = createFileRoute('/widget/')({
       (settings?.publicWidgetConfig?.tabs?.chat ?? false)
 
     // Presence is tenant-global (not visitor-specific), so the anonymous SSR
-    // baseline value is exactly correct for every visitor — seed it so the chat
-    // online/offline strip paints right immediately instead of flashing "away"
-    // until the first client poll. Skipped (null) when chat isn't shown.
-    let chatPresence: ChatPresence | null = null
+    // baseline value is exactly correct for every visitor — seed the shared
+    // presence query so the chat online/offline strip paints right immediately
+    // instead of flashing "away" until the first client poll. The seed is
+    // dehydrated to the client just like the votedPosts seed below. Skipped when
+    // chat isn't shown.
     if (chatTabEnabled) {
       try {
         // Call the server fn (not an unwrapped helper): its handler — and the
         // ioredis-reaching presence import inside it — is stripped from the
         // client bundle. Server-side it runs inline and returns the verdict.
         const { getChatPresenceFn } = await import('@/lib/server/functions/chat')
-        chatPresence = await getChatPresenceFn()
+        queryClient.setQueryData(CHAT_PRESENCE_QUERY_KEY, await getChatPresenceFn())
       } catch {
-        // A presence read failure must never break the whole widget load — fall
-        // back to no seed (offline) and let the client poll correct it.
-        chatPresence = null
+        // A presence read failure must never break the whole widget load — leave
+        // the seed empty and let the client query fetch presence on mount.
       }
     }
 
     return {
-      chatPresence,
       posts: portalData.posts.items.map((p) => ({
         id: p.id,
         title: p.title,
@@ -166,7 +165,6 @@ function WidgetPage() {
     defaultBoard,
     portalAccess,
     portalOrigin,
-    chatPresence,
   } = Route.useLoaderData()
   const { ensureSession, sessionVersion } = useWidgetAuth()
 
@@ -364,7 +362,6 @@ function WidgetPage() {
       {view === 'overview' && (
         <WidgetOverview
           tabs={tabs}
-          initialPresence={chatPresence}
           onLeaveFeedback={() => handleTabChange('feedback')}
           onGetHelp={() => handleTabChange('help')}
           onResumeChat={() => {
@@ -382,11 +379,7 @@ function WidgetPage() {
       {view === 'changelog' && <WidgetChangelog onEntrySelect={handleChangelogEntrySelect} />}
 
       {view === 'chat' && (
-        <WidgetLiveChat
-          helpEnabled={tabs.help}
-          onArticleSelect={handleHelpArticleSelect}
-          initialPresence={chatPresence}
-        />
+        <WidgetLiveChat helpEnabled={tabs.help} onArticleSelect={handleHelpArticleSelect} />
       )}
 
       {view === 'changelog-detail' && selectedChangelogId && (
@@ -398,7 +391,6 @@ function WidgetPage() {
           onArticleSelect={handleHelpArticleSelect}
           onCategorySelect={handleHelpCategorySelect}
           onOpenChat={tabs.chat ? () => setView('chat') : undefined}
-          chatPresence={chatPresence}
         />
       )}
 

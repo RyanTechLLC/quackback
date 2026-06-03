@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { FormattedMessage, useIntl } from 'react-intl'
 import { buildChatRows, type ChatRow } from './widget-chat-rows'
 import { ChatPresenceBadge } from './chat-presence-badge'
-import { chatAvailable, CHAT_PRESENCE_POLL_MS, type ChatPresence } from '@/lib/shared/chat/presence'
+import { chatAvailable } from '@/lib/shared/chat/presence'
+import { useChatPresence, markAgentPresentInCache } from './use-chat-presence'
 import { PaperAirplaneIcon, ChevronDownIcon } from '@heroicons/react/24/solid'
 import {
   ChatBubbleLeftRightIcon,
@@ -28,7 +30,6 @@ import { useChatComposerAttachments } from '@/lib/client/hooks/use-chat-composer
 import type { ChatAttachment, ChatMessageDTO } from '@/lib/shared/chat/types'
 import {
   getMyChatFn,
-  getChatPresenceFn,
   sendChatMessageFn,
   listChatMessagesFn,
   markChatReadFn,
@@ -46,18 +47,16 @@ interface WidgetLiveChatProps {
   helpEnabled?: boolean
   /** Open a help article by slug (switches the widget to the article view). */
   onArticleSelect?: (slug: string) => void
-  /** SSR-seeded presence so the online/offline strip is right on first paint. */
-  initialPresence?: ChatPresence | null
 }
 
-export function WidgetLiveChat({
-  helpEnabled,
-  onArticleSelect,
-  initialPresence,
-}: WidgetLiveChatProps = {}) {
+export function WidgetLiveChat({ helpEnabled, onArticleSelect }: WidgetLiveChatProps = {}) {
   const intl = useIntl()
+  const queryClient = useQueryClient()
   const { user, ensureSession, sessionVersion } = useWidgetAuth()
   const firstName = firstNameOf(user?.name)
+  // Presence (online/offline + office hours) comes from the one shared query —
+  // SSR-seeded, polled once, and shared with every other widget surface.
+  const presence = useChatPresence(true)
 
   const [loading, setLoading] = useState(true)
   const [conversationId, setConversationId] = useState<ConversationId | null>(null)
@@ -65,17 +64,6 @@ export function WidgetLiveChat({
   const [welcomeMessage, setWelcomeMessage] = useState<string | null>(null)
   const [offlineMessage, setOfflineMessage] = useState<string | null>(null)
   const [teamName, setTeamName] = useState<string | null>(null)
-  // Seeded from the SSR loader (tenant-global presence) so the online/offline
-  // strip is correct on first paint; the load + poll below keep it fresh.
-  const [agentsOnline, setAgentsOnline] = useState(initialPresence?.agentsOnline ?? false)
-  // null = no office-hours schedule; true/false = the schedule's verdict at load.
-  const [withinOfficeHours, setWithinOfficeHours] = useState<boolean | null>(
-    initialPresence?.withinOfficeHours ?? null
-  )
-  // ISO instant the team is next back (only when the schedule says we're closed).
-  const [nextOpenAtIso, setNextOpenAtIso] = useState<string | null>(
-    initialPresence?.nextOpenAt ?? null
-  )
   const [agentReadAt, setAgentReadAt] = useState<string | null>(null)
   // Pre-chat email capture (anonymous visitors).
   const [preChatMode, setPreChatMode] = useState<'off' | 'optional' | 'required'>('off')
@@ -156,9 +144,6 @@ export function WidgetLiveChat({
         setWelcomeMessage(res.welcomeMessage)
         setOfflineMessage(res.offlineMessage)
         setTeamName(res.teamName)
-        setAgentsOnline(res.agentsOnline)
-        setWithinOfficeHours(res.withinOfficeHours)
-        setNextOpenAtIso(res.nextOpenAt)
         setPreChatMode(res.preChatEmail)
         setCanEmailReply(res.canEmailVisitor)
         setEmailKnown(res.visitorHasEmail)
@@ -177,27 +162,6 @@ export function WidgetLiveChat({
     })()
     return () => {
       cancelled = true
-    }
-  }, [sessionVersion])
-
-  // Keep presence fresh while the chat is open. The SSE stream flips us online
-  // the moment an agent acts; this poll catches the reverse (agents going
-  // offline) and office-hours changes. Presence-only — never touches messages.
-  useEffect(() => {
-    let cancelled = false
-    const poll = () =>
-      void getChatPresenceFn({ headers: getWidgetAuthHeaders() })
-        .then((p) => {
-          if (cancelled) return
-          setAgentsOnline(p.agentsOnline)
-          setWithinOfficeHours(p.withinOfficeHours)
-          setNextOpenAtIso(p.nextOpenAt)
-        })
-        .catch(() => {})
-    const id = setInterval(poll, CHAT_PRESENCE_POLL_MS)
-    return () => {
-      cancelled = true
-      clearInterval(id)
     }
   }, [sessionVersion])
 
@@ -257,11 +221,11 @@ export function WidgetLiveChat({
         appendMessage(evt.message)
         if (evt.message.senderType === 'agent') {
           clearRemoteTyping()
-          setAgentsOnline(true) // an agent is clearly here right now
+          markAgentPresentInCache(queryClient) // an agent is clearly here right now
         }
       } else if (evt.kind === 'typing' && evt.side === 'agent') {
         onRemoteTyping()
-        setAgentsOnline(true)
+        markAgentPresentInCache(queryClient)
       } else if (evt.kind === 'read' && evt.side === 'agent') {
         setAgentReadAt(evt.at)
       } else if (evt.kind === 'message_deleted') {
@@ -357,19 +321,19 @@ export function WidgetLiveChat({
 
   // Availability shown to the visitor: a live agent always counts as online;
   // when office hours are configured, the schedule also marks us available.
-  const available = chatAvailable(agentsOnline, withinOfficeHours)
+  const available = chatAvailable(presence.agentsOnline, presence.withinOfficeHours)
 
   // "Back at" time for the away state, formatted in the visitor's own locale.
   const reopenLabel = useMemo(() => {
-    if (!nextOpenAtIso) return null
-    const at = new Date(nextOpenAtIso)
+    if (!presence.nextOpenAt) return null
+    const at = new Date(presence.nextOpenAt)
     if (Number.isNaN(at.getTime())) return null
     return new Intl.DateTimeFormat(intl.locale, {
       weekday: 'long',
       hour: 'numeric',
       minute: '2-digit',
     }).format(at)
-  }, [nextOpenAtIso, intl.locale])
+  }, [presence.nextOpenAt, intl.locale])
 
   // Pre-chat email: prompt only before the conversation starts, for anonymous
   // visitors, when configured. 'required' blocks sending until a valid address.

@@ -9,12 +9,9 @@ import { firstNameOf } from '@/lib/shared/chat/personalize'
 import { WidgetResumeCard } from './widget-resume-card'
 import { WidgetChangelogTeaser } from './widget-changelog-teaser'
 import { type EnabledTabs, supportEnabled } from './widget-nav'
-import type { ChatPresence } from '@/lib/shared/chat/presence'
 
 interface WidgetOverviewProps {
   tabs: EnabledTabs
-  /** SSR-seeded presence, forwarded to the resume card's online dot. */
-  initialPresence?: ChatPresence | null
   /** Open the feedback feed (Suggest a feature). */
   onLeaveFeedback: () => void
   /** Open the support surface (help articles + messages). */
@@ -36,7 +33,6 @@ interface WidgetOverviewProps {
  */
 export function WidgetOverview({
   tabs,
-  initialPresence,
   onLeaveFeedback,
   onGetHelp,
   onResumeChat,
@@ -49,7 +45,7 @@ export function WidgetOverview({
   // A recent-conversation resume card is a chat concept — only fetched/shown
   // when chat is part of the support surface. Presence now lives on the support
   // surface's message CTA, not here.
-  const { conversation, teamName, agentsOnline } = useChatSummary(!!tabs.chat, initialPresence)
+  const { conversation, teamName, agentsOnline } = useChatSummary(!!tabs.chat)
 
   return (
     <div className="flex flex-col h-full">
