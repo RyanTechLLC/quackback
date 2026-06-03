@@ -1,4 +1,4 @@
-import { createFileRoute, Navigate, useNavigate, useRouteContext } from '@tanstack/react-router'
+import { createFileRoute, Navigate, useRouteContext } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -70,13 +70,28 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn } from '@/lib/shared/utils'
 import type { FeatureFlags } from '@/lib/shared/types/settings'
 
+/** A real conversation status, or 'all' = no status filter. */
+type StatusFilter = ConversationStatus | 'all'
+
+const PRIORITY_VALUES = ['all', 'none', 'low', 'medium', 'high', 'urgent'] as const
+
+/** Inbox URL search params — the source of truth for the open chat + filters. */
+export interface InboxSearch {
+  c?: string
+  view?: InboxView
+  tag?: string
+  status?: StatusFilter
+  priority?: ConversationPriority | 'all'
+  q?: string
+}
+
 export const Route = createFileRoute('/admin/inbox')({
   // `?c=<conversationId>` deep-links a conversation open (e.g. from a user
   // profile). `?view=`/`?tag=` deep-link the left-nav scope so it survives a
   // refresh and is shareable. All optional, so existing `{ c }` links still type.
-  validateSearch: (
-    search: Record<string, unknown>
-  ): { c?: string; view?: InboxView; tag?: string } => ({
+  // Everything that defines the current view lives in the URL so a refresh
+  // restores the exact open conversation + filters, and links are shareable.
+  validateSearch: (search: Record<string, unknown>): InboxSearch => ({
     c: typeof search.c === 'string' ? search.c : undefined,
     view:
       search.view === 'mine' ||
@@ -91,6 +106,17 @@ export const Route = createFileRoute('/admin/inbox')({
       typeof search.tag === 'string' && isValidTypeId(search.tag, 'chat_tag')
         ? search.tag
         : undefined,
+    status:
+      search.status === 'open' ||
+      search.status === 'pending' ||
+      search.status === 'closed' ||
+      search.status === 'all'
+        ? search.status
+        : undefined,
+    priority: PRIORITY_VALUES.includes(search.priority as ConversationPriority | 'all')
+      ? (search.priority as ConversationPriority | 'all')
+      : undefined,
+    q: typeof search.q === 'string' && search.q ? search.q : undefined,
   }),
   loader: async () => {
     const { requireWorkspaceRole } = await import('@/lib/server/functions/workspace-utils')
@@ -113,9 +139,6 @@ function InboxRoute() {
   }
   return <InboxPage />
 }
-
-/** A real conversation status, or 'all' = no status filter. */
-type StatusFilter = ConversationStatus | 'all'
 
 /**
  * Map the active nav scope + filter chips to the list-query params. The primary
@@ -145,18 +168,38 @@ function buildListParams(
 
 function InboxPage() {
   const queryClient = useQueryClient()
-  const navigate = useNavigate()
+  const navigate = Route.useNavigate()
   // Message ids with an in-flight flag toggle (populated by the open thread's
   // flag mutation, read by this page's SSE handler) so a concurrent
   // message_updated broadcast can't flicker the optimistic flag away.
   const flagPendingRef = useRef<Set<ChatMessageId>>(new Set())
-  const { c: deepLinkConversationId, view: urlView, tag: urlTag } = Route.useSearch()
-  const [status, setStatus] = useState<StatusFilter>('open')
-  const [priorityFilter, setPriorityFilter] = useState<ConversationPriority | 'all'>('all')
+  const {
+    c: urlC,
+    view: urlView,
+    tag: urlTag,
+    status: urlStatus,
+    priority: urlPriority,
+    q: urlQ,
+  } = Route.useSearch()
+
+  // The URL is the single source of truth for the open conversation + filters,
+  // so a refresh restores the exact view and any link is shareable. Every
+  // selection merges into the search params (replace, so it doesn't spam
+  // history) and the values below are derived straight back from the URL.
+  const updateSearch = useCallback(
+    (partial: Partial<InboxSearch>) => {
+      void navigate({
+        to: '/admin/inbox',
+        search: (prev) => ({ ...prev, ...partial }),
+        replace: true,
+      })
+    },
+    [navigate]
+  )
+
   // Left-nav scope: an assignee queue (Mine / Unassigned / All), the Mentions
   // feed, or a single Label. Status/priority chips refine WITHIN it; Mentions is
-  // a self-contained feed so those chips are hidden. The URL is the source of
-  // truth so the scope is shareable + survives a refresh.
+  // a self-contained feed so those chips are hidden.
   const nav = useMemo<InboxNavItem>(
     () =>
       urlTag
@@ -165,29 +208,41 @@ function InboxPage() {
     [urlTag, urlView]
   )
   const setNav = useCallback(
-    (item: InboxNavItem) => {
-      void navigate({
-        to: '/admin/inbox',
-        search: (prev) => ({
-          ...prev,
-          view: item.kind === 'view' ? item.view : undefined,
-          tag: item.kind === 'tag' ? item.tagId : undefined,
-        }),
-        replace: true,
-      })
-    },
-    [navigate]
+    (item: InboxNavItem) =>
+      updateSearch({
+        view: item.kind === 'view' ? item.view : undefined,
+        tag: item.kind === 'tag' ? item.tagId : undefined,
+      }),
+    [updateSearch]
   )
+
+  const status: StatusFilter = urlStatus ?? 'open'
+  const setStatus = useCallback(
+    (s: StatusFilter) => updateSearch({ status: s === 'open' ? undefined : s }),
+    [updateSearch]
+  )
+  const priorityFilter: ConversationPriority | 'all' = urlPriority ?? 'all'
+  const setPriorityFilter = useCallback(
+    (p: ConversationPriority | 'all') => updateSearch({ priority: p === 'all' ? undefined : p }),
+    [updateSearch]
+  )
+  const selectedId = (urlC as ConversationId | undefined) ?? null
+  const setSelectedId = useCallback(
+    (id: ConversationId | null) => updateSearch({ c: id ?? undefined }),
+    [updateSearch]
+  )
+
   // The status/priority chips apply to every scope except the Mentions feed.
   const showRefinements = nav.kind === 'tag' || nav.view !== 'mentions'
   const { data: navTags } = useChatTagsWithCounts()
   const scopeLabel = scopeLabelFor(nav, navTags)
-  const [selectedId, setSelectedId] = useState<ConversationId | null>(
-    (deepLinkConversationId as ConversationId | undefined) ?? null
-  )
-  const [searchInput, setSearchInput] = useState('')
-  // Debounce the search box so we don't refetch on every keystroke.
+
+  // Search is a live local input mirrored (debounced) into the URL `q`.
+  const [searchInput, setSearchInput] = useState(urlQ ?? '')
   const search = useDebouncedValue(searchInput.trim(), 300)
+  useEffect(() => {
+    updateSearch({ q: search || undefined })
+  }, [search, updateSearch])
 
   const listKey = useMemo(
     () =>
