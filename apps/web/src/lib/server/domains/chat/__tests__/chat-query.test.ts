@@ -7,7 +7,7 @@
  * listConversationsForAgent SQL builder is intentionally not exercised here.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ConversationId, ChatMessageId, PrincipalId } from '@quackback/ids'
+import type { ConversationId, ChatMessageId, PrincipalId, SegmentId } from '@quackback/ids'
 import type { Conversation, ChatMessage } from '@/lib/server/db'
 import type { ChatAuthorDTO } from '@/lib/shared/chat/types'
 
@@ -54,6 +54,7 @@ vi.mock('@/lib/server/db', () => {
     conversations: { __name: 'conversations' },
     chatMessages: { __name: 'chat_messages' },
     chatMessageMentions: { __name: 'chat_message_mentions' },
+    userSegments: { __name: 'user_segments' },
     // SQL helpers — no-op stubs; inArray records its second arg for assertions.
     eq: vi.fn(),
     and: vi.fn(),
@@ -287,6 +288,27 @@ describe('listConversationsForAgent assignee filter', () => {
   it('does not constrain the assignee by default', async () => {
     await listConversationsForAgent({})
     expect(isNull).not.toHaveBeenCalled()
+  })
+})
+
+describe('listConversationsForAgent segment filter', () => {
+  const segmentId = 'segment_eng' as SegmentId
+
+  it('restricts to conversations whose visitor is in the requested segments', async () => {
+    await listConversationsForAgent({ segmentIds: [segmentId] })
+    // The membership subquery pins conversations to visitors in these segments;
+    // the inner inArray carries the requested segment ids.
+    expect(inArrayCalls.some((c) => Array.isArray(c) && c.includes(segmentId))).toBe(true)
+  })
+
+  it('does not add the segment condition by default', async () => {
+    await listConversationsForAgent({})
+    expect(inArrayCalls).toHaveLength(0)
+  })
+
+  it('ignores an empty segmentIds array', async () => {
+    await listConversationsForAgent({ segmentIds: [] })
+    expect(inArrayCalls).toHaveLength(0)
   })
 })
 

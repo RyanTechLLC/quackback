@@ -12,7 +12,7 @@ import {
 } from '@heroicons/react/24/solid'
 import { toast } from 'sonner'
 import { isValidTypeId } from '@quackback/ids'
-import type { ConversationId, ChatMessageId, ChatTagId } from '@quackback/ids'
+import type { ConversationId, ChatMessageId, ChatTagId, SegmentId } from '@quackback/ids'
 import {
   listConversationsFn,
   getConversationFn,
@@ -53,6 +53,7 @@ import {
   isInboxView,
   scopeLabelFor,
   useChatTagsWithCounts,
+  useInboxSegmentsWithCounts,
   type InboxNavItem,
   type InboxView,
 } from '@/components/admin/chat/inbox-nav-sidebar'
@@ -84,6 +85,7 @@ export interface InboxSearch {
   m?: string
   view?: InboxView
   tag?: string
+  segment?: string
   status?: StatusFilter
   priority?: ConversationPriority | 'all'
   q?: string
@@ -108,6 +110,12 @@ export const Route = createFileRoute('/admin/inbox')({
     tag:
       typeof search.tag === 'string' && isValidTypeId(search.tag, 'chat_tag')
         ? search.tag
+        : undefined,
+    // Only accept a well-formed segment id — a malformed `?segment=` would reach
+    // a uuid-backed membership subquery and 500 the conversation list.
+    segment:
+      typeof search.segment === 'string' && isValidTypeId(search.segment, 'segment')
+        ? search.segment
         : undefined,
     status:
       search.status === 'open' ||
@@ -159,6 +167,8 @@ function buildListParams(
   const statusParam = status === 'all' ? undefined : status
   const q = search || undefined
   if (nav.kind === 'tag') return { tagIds: [nav.tagId], status: statusParam, priority, search: q }
+  if (nav.kind === 'segment')
+    return { segmentIds: [nav.segmentId], status: statusParam, priority, search: q }
   if (nav.view === 'mentions') return { view: 'mentions' as const, search: q }
   const assignee =
     nav.view === 'mine'
@@ -177,6 +187,7 @@ function InboxPage() {
     m: urlM,
     view: urlView,
     tag: urlTag,
+    segment: urlSegment,
     status: urlStatus,
     priority: urlPriority,
     q: urlQ,
@@ -198,20 +209,26 @@ function InboxPage() {
   )
 
   // Left-nav scope: an assignee queue (Mine / Unassigned / All), the Mentions
-  // feed, or a single Label. Status/priority chips refine WITHIN it; Mentions is
-  // a self-contained feed so those chips are hidden.
+  // feed, a single Label, or a single Segment. Scopes are mutually exclusive;
+  // tag wins over segment wins over view if the URL somehow carries more than
+  // one. Status/priority chips refine WITHIN it; Mentions is a self-contained
+  // feed so those chips are hidden.
   const nav = useMemo<InboxNavItem>(
     () =>
       urlTag
         ? { kind: 'tag', tagId: urlTag as ChatTagId }
-        : { kind: 'view', view: urlView ?? 'all' },
-    [urlTag, urlView]
+        : urlSegment
+          ? { kind: 'segment', segmentId: urlSegment as SegmentId }
+          : { kind: 'view', view: urlView ?? 'all' },
+    [urlTag, urlSegment, urlView]
   )
+  // Selecting any scope clears the other two so exactly one stays in the URL.
   const setNav = useCallback(
     (item: InboxNavItem) =>
       updateSearch({
         view: item.kind === 'view' ? item.view : undefined,
         tag: item.kind === 'tag' ? item.tagId : undefined,
+        segment: item.kind === 'segment' ? item.segmentId : undefined,
       }),
     [updateSearch]
   )
@@ -242,10 +259,12 @@ function InboxPage() {
     [updateSearch]
   )
 
-  // The status/priority chips apply to every scope except the Mentions feed.
-  const showRefinements = nav.kind === 'tag' || nav.view !== 'mentions'
+  // The status/priority chips apply to every scope except the Mentions feed
+  // (tag + segment scopes both refine by status/priority).
+  const showRefinements = nav.kind !== 'view' || nav.view !== 'mentions'
   const { data: navTags } = useChatTagsWithCounts()
-  const scopeLabel = scopeLabelFor(nav, navTags)
+  const { data: navSegments } = useInboxSegmentsWithCounts()
+  const scopeLabel = scopeLabelFor(nav, navTags, navSegments)
 
   // Search is a live local input mirrored (debounced) into the URL `q`.
   const [searchInput, setSearchInput] = useState(urlQ ?? '')
@@ -368,12 +387,17 @@ function InboxPage() {
             prev ? { ...prev, messages: prev.messages.filter((m) => m.id !== evt.messageId) } : prev
         )
       } else if (evt.kind === 'conversation' && evt.conversation.id === selectedId) {
-        // Keep the open thread's status/assignment in sync with changes
-        // made by another agent.
+        // Keep the open thread's status/assignment in sync with changes made by
+        // another agent — but keep OUR locally-written tags. Tag mutations are
+        // authoritative on the editing client and have no broadcast channel, so a
+        // foreign metadata event (whose tag-load may predate our just-applied
+        // tag) must not clobber them back to a stale list.
         queryClient.setQueryData(
           ['admin', 'inbox', 'thread', selectedId],
           (prev: ThreadCache | undefined) =>
-            prev ? { ...prev, conversation: evt.conversation } : prev
+            prev
+              ? { ...prev, conversation: { ...evt.conversation, tags: prev.conversation.tags } }
+              : prev
         )
       }
     },

@@ -26,10 +26,18 @@ import {
   chatMessageMentions,
   chatMessageReactions,
   chatMessageFlags,
+  userSegments,
   type Conversation,
   type ChatMessage,
 } from '@/lib/server/db'
-import type { ConversationId, PrincipalId, PostId, ChatTagId, ChatMessageId } from '@quackback/ids'
+import type {
+  ConversationId,
+  PrincipalId,
+  PostId,
+  ChatTagId,
+  ChatMessageId,
+  SegmentId,
+} from '@quackback/ids'
 import { aggregateReactions } from '@/lib/shared'
 import { getPublicUrlOrNull } from '@/lib/server/storage/s3'
 import { truncate } from '@/lib/shared/utils/string'
@@ -586,6 +594,10 @@ export interface ConversationListFilter {
   search?: string
   /** Filter to conversations carrying ANY of these labels (OR semantics). */
   tagIds?: ChatTagId[]
+  /** Filter to conversations whose visitor is a member of ANY of these segments
+   *  (OR semantics). Exclusive-scope today sends a single id, but the array keeps
+   *  it symmetric with tagIds. */
+  segmentIds?: SegmentId[]
   /** "Mentions" view: only conversations whose internal notes @-mention this
    *  principal. Always the requesting agent — resolved server-side from auth,
    *  never client-supplied (it would leak who-mentioned-whom). */
@@ -667,6 +679,19 @@ export async function listConversationsForAgent(
                     isNull(chatTags.deletedAt)
                   )
                 )
+            )
+          : undefined,
+        // Segment filter: conversations whose visitor (the principal who opened
+        // the conversation) is a member of ANY of the selected segments. Mirrors
+        // the post/user inbox pattern (post.inbox.ts) — a subquery over
+        // user_segments keeps the outer select shape (conversations only).
+        filter.segmentIds && filter.segmentIds.length > 0
+          ? inArray(
+              conversations.visitorPrincipalId,
+              db
+                .select({ principalId: userSegments.principalId })
+                .from(userSegments)
+                .where(inArray(userSegments.segmentId, filter.segmentIds))
             )
           : undefined,
         // Mentions view: conversations carrying an internal note that @-mentions
