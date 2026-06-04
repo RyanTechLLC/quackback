@@ -37,6 +37,10 @@ function relativeTime(iso: string): string {
 /** The empty-list message for the active scope + status filter. */
 function emptyStateMessage(nav: InboxNavItem, status: StatusFilter, scopeLabel: string): string {
   if (nav.kind === 'tag') return `No conversations labelled ${scopeLabel}`
+  if (nav.kind === 'segment') {
+    const part = status === 'all' ? '' : `${status} `
+    return `No ${part}conversations from ${scopeLabel}`
+  }
   if (nav.view === 'mentions') return 'No conversations mention you yet'
   const statusPart = status === 'all' ? '' : `${status} `
   if (nav.view === 'mine') return `No ${statusPart}conversations assigned to you`

@@ -46,6 +46,22 @@ export function normalizeChatTagInput(input: { name: string; color?: string }): 
   return { name, color }
 }
 
+/**
+ * Would renaming `targetId` to `name` collide with a DIFFERENT live tag?
+ * Case-insensitive + trimmed, and never flags a tag against its own current name
+ * (so a pure recolor or a casing tweak is allowed). Pure (no I/O) so the rename
+ * guard is unit-tested directly; `updateChatTag` composes it with the live-tag
+ * fetch.
+ */
+export function hasNameConflict(
+  targetId: ChatTagId,
+  name: string,
+  liveTags: { id: ChatTagId; name: string }[]
+): boolean {
+  const needle = name.trim().toLowerCase()
+  return liveTags.some((t) => t.id !== targetId && t.name.toLowerCase() === needle)
+}
+
 const toDTO = (t: { id: ChatTagId; name: string; color: string }): ChatTagDTO => ({
   id: t.id,
   name: t.name,
@@ -111,6 +127,72 @@ export async function listChatTagsWithCounts(): Promise<(ChatTagDTO & { count: n
     .groupBy(chatTags.id, chatTags.name, chatTags.color)
     .orderBy(asc(chatTags.name))
   return rows.map((r) => ({ ...toDTO(r), count: r.count }))
+}
+
+/**
+ * Rename and/or recolor a live tag. Renaming onto another live tag's name
+ * (case-insensitive) is rejected rather than merged, so the taxonomy can't grow
+ * silent duplicates. A pure recolor (or a casing-only rename) passes. Returns
+ * the updated tag; throws NotFound if the id is missing or already soft-deleted.
+ */
+export async function updateChatTag(
+  id: ChatTagId,
+  input: { name?: string; color?: string }
+): Promise<ChatTagDTO> {
+  const patch: { name?: string; color?: string } = {}
+  if (input.name !== undefined) {
+    const name = input.name.trim()
+    if (!name) throw new ValidationError('VALIDATION_ERROR', 'Tag name is required')
+    if (name.length > 50) {
+      throw new ValidationError('VALIDATION_ERROR', 'Tag name must not exceed 50 characters')
+    }
+    const live = await db.query.chatTags.findMany({
+      where: isNull(chatTags.deletedAt),
+      columns: { id: true, name: true },
+    })
+    if (hasNameConflict(id, name, live)) {
+      throw new ValidationError('VALIDATION_ERROR', 'A tag with that name already exists')
+    }
+    patch.name = name
+  }
+  if (input.color !== undefined) {
+    if (!HEX_COLOR.test(input.color)) {
+      throw new ValidationError(
+        'VALIDATION_ERROR',
+        'Color must be a valid hex color (e.g., #6b7280)'
+      )
+    }
+    patch.color = input.color
+  }
+  // Nothing to change (defensive — the server fn requires ≥1 field): return the
+  // current row rather than running an empty UPDATE.
+  if (Object.keys(patch).length === 0) {
+    const current = await db.query.chatTags.findFirst({
+      where: and(eq(chatTags.id, id), isNull(chatTags.deletedAt)),
+    })
+    if (!current) throw new NotFoundError('TAG_NOT_FOUND', `Chat tag ${id} not found`)
+    return toDTO(current)
+  }
+  let row
+  try {
+    ;[row] = await db
+      .update(chatTags)
+      .set(patch)
+      .where(and(eq(chatTags.id, id), isNull(chatTags.deletedAt)))
+      .returning()
+  } catch (err) {
+    // The name unique constraint spans soft-deleted rows, and a concurrent
+    // rename could race the live-name check above — both cases collide only at
+    // the DB. Translate the raw unique-violation into the same ValidationError
+    // the pre-check throws (mirrors createChatTag absorbing the constraint)
+    // rather than surfacing a 500.
+    if ((err as { code?: string }).code === '23505') {
+      throw new ValidationError('VALIDATION_ERROR', 'A tag with that name already exists')
+    }
+    throw err
+  }
+  if (!row) throw new NotFoundError('TAG_NOT_FOUND', `Chat tag ${id} not found`)
+  return toDTO(row)
 }
 
 /**

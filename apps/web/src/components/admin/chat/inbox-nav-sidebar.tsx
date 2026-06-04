@@ -9,8 +9,9 @@ import {
   MagnifyingGlassIcon,
   FlagIcon,
 } from '@heroicons/react/24/solid'
-import type { ChatTagId } from '@quackback/ids'
+import type { ChatTagId, SegmentId } from '@quackback/ids'
 import { fetchChatTagsWithCountsFn } from '@/lib/server/functions/chat-tags'
+import { fetchInboxSegmentsWithCountsFn } from '@/lib/server/functions/chat-segments'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,19 +24,12 @@ import { PageHeader } from '@/components/shared/page-header'
 import { FilterSection } from '@/components/shared/filter-section'
 import { cn } from '@/lib/shared/utils'
 
-/**
- * The active left-nav selection. A single item is highlighted at a time: one of
- * the Conversations views, or one Label. Assignee/status/search in the list
- * header refine WITHIN the selected scope. Carries only ids so it round-trips
- * through the URL; the label is resolved from the fetched tag list.
- */
-export type InboxView = 'mine' | 'unassigned' | 'all' | 'mentions' | 'saved'
-export type InboxNavItem = { kind: 'view'; view: InboxView } | { kind: 'tag'; tagId: ChatTagId }
-
-/** Stable identity for query keys + active-state comparison. */
-export function inboxNavKey(nav: InboxNavItem): string {
-  return nav.kind === 'tag' ? `tag:${nav.tagId}` : `view:${nav.view}`
-}
+// The active left-nav selection (one view / label / segment at a time) and its
+// key live in lib/ so the route loader + query factory can share them without
+// importing this component. Re-exported here so existing nav consumers are
+// unaffected.
+export { inboxNavKey, type InboxView, type InboxNavItem } from '@/lib/client/chat/inbox-scope'
+import { inboxNavKey, type InboxView, type InboxNavItem } from '@/lib/client/chat/inbox-scope'
 
 // Primary views are assignee-based queues — Mine / Unassigned / All — then the
 // @-mentions feed and the personal "Saved for later" feed of flagged messages.
@@ -71,9 +65,28 @@ export function useChatTagsWithCounts() {
   })
 }
 
-/** Human label for the active scope, resolving a tag id against the tag list. */
-export function scopeLabelFor(nav: InboxNavItem, tags?: ChatTagWithCount[]): string {
+export type InboxSegmentWithCount = { id: SegmentId; name: string; color: string; count: number }
+
+const INBOX_SEGMENT_COUNTS_KEY = ['admin', 'inbox', 'segments', 'counts'] as const
+
+/** Shared (deduped) source of the segments + per-segment open-conversation counts. */
+export function useInboxSegmentsWithCounts() {
+  return useQuery({
+    queryKey: INBOX_SEGMENT_COUNTS_KEY,
+    queryFn: () => fetchInboxSegmentsWithCountsFn() as Promise<InboxSegmentWithCount[]>,
+    staleTime: 60_000,
+  })
+}
+
+/** Human label for the active scope, resolving a tag/segment id against its list. */
+export function scopeLabelFor(
+  nav: InboxNavItem,
+  tags?: ChatTagWithCount[],
+  segments?: InboxSegmentWithCount[]
+): string {
   if (nav.kind === 'tag') return tags?.find((t) => t.id === nav.tagId)?.name ?? 'Label'
+  if (nav.kind === 'segment')
+    return segments?.find((s) => s.id === nav.segmentId)?.name ?? 'Segment'
   return nav.view === 'mentions'
     ? 'Mentions'
     : nav.view === 'saved'
@@ -95,11 +108,109 @@ const itemClass = (active: boolean) =>
       : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
   )
 
+/** A selectable scope row carrying a color + count (a Tag or a Segment). */
+type ScopeRow = { id: string; name: string; color: string; count: number }
+
+/**
+ * One collapsible nav group of color-dot scope rows (Tags or Segments). Renders
+ * nothing when empty, so an org with no tags/segments shows no empty header. The
+ * `makeItem` adapter turns a row id into the right `InboxNavItem` variant.
+ */
+function ScopeFilterSection({
+  title,
+  rows,
+  activeKey,
+  onSelect,
+  makeItem,
+}: {
+  title: string
+  rows: ScopeRow[]
+  activeKey: string
+  onSelect: (item: InboxNavItem) => void
+  makeItem: (id: string) => InboxNavItem
+}) {
+  if (rows.length === 0) return null
+  return (
+    <FilterSection title={title}>
+      <div className="space-y-1">
+        {rows.map((r) => {
+          const item = makeItem(r.id)
+          const active = activeKey === inboxNavKey(item)
+          return (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => onSelect(item)}
+              className={itemClass(active)}
+            >
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: r.color }}
+              />
+              <span className="min-w-0 flex-1 truncate text-left">{r.name}</span>
+              <span className="shrink-0 text-[11px] text-muted-foreground">{r.count}</span>
+            </button>
+          )
+        })}
+      </div>
+    </FilterSection>
+  )
+}
+
+/** The mobile (dropdown) equivalent of ScopeFilterSection. */
+function ScopeMenuSection({
+  title,
+  rows,
+  activeKey,
+  onSelect,
+  makeItem,
+}: {
+  title: string
+  rows: ScopeRow[]
+  activeKey: string
+  onSelect: (item: InboxNavItem) => void
+  makeItem: (id: string) => InboxNavItem
+}) {
+  if (rows.length === 0) return null
+  return (
+    <>
+      <DropdownMenuSeparator />
+      <DropdownMenuLabel className="text-[11px] uppercase tracking-wide text-muted-foreground">
+        {title}
+      </DropdownMenuLabel>
+      {rows.map((r) => {
+        const item = makeItem(r.id)
+        return (
+          <DropdownMenuItem
+            key={r.id}
+            onClick={() => onSelect(item)}
+            className={cn('gap-2', activeKey === inboxNavKey(item) && 'text-primary')}
+          >
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: r.color }}
+            />
+            <span className="min-w-0 flex-1 truncate">{r.name}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">{r.count}</span>
+          </DropdownMenuItem>
+        )
+      })}
+    </>
+  )
+}
+
+const tagNavItem = (id: string): InboxNavItem => ({ kind: 'tag', tagId: id as ChatTagId })
+const segmentNavItem = (id: string): InboxNavItem => ({
+  kind: 'segment',
+  segmentId: id as SegmentId,
+})
+
 /**
  * Grouped inbox navigation: a Conversations group (Mine / Unassigned / All /
- * Mentions) and a Tags group with per-tag conversation counts. Desktop-only
- * (md+); the
- * mobile equivalent is InboxScopeMenu in the list header.
+ * Mentions / Saved), a Tags group with per-tag conversation counts, and a
+ * Segments group with per-segment open-conversation counts. Tag and segment
+ * scopes are mutually exclusive with each other and the views. Desktop-only
+ * (lg+); the mobile equivalent is InboxScopeMenu in the list header.
  */
 export function InboxNavSidebar({
   nav,
@@ -113,6 +224,7 @@ export function InboxNavSidebar({
   onSearch: (value: string) => void
 }) {
   const { data: tags } = useChatTagsWithCounts()
+  const { data: segments } = useInboxSegmentsWithCounts()
   const activeKey = inboxNavKey(nav)
 
   return (
@@ -155,39 +267,29 @@ export function InboxNavSidebar({
           </div>
         </FilterSection>
 
-        {tags && tags.length > 0 && (
-          <FilterSection title="Tags">
-            <div className="space-y-1">
-              {tags.map((t) => {
-                const item: InboxNavItem = { kind: 'tag', tagId: t.id }
-                const active = activeKey === inboxNavKey(item)
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => onSelect(item)}
-                    className={itemClass(active)}
-                  >
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: t.color }}
-                    />
-                    <span className="min-w-0 flex-1 truncate text-left">{t.name}</span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">{t.count}</span>
-                  </button>
-                )
-              })}
-            </div>
-          </FilterSection>
-        )}
+        <ScopeFilterSection
+          title="Tags"
+          rows={tags ?? []}
+          activeKey={activeKey}
+          onSelect={onSelect}
+          makeItem={tagNavItem}
+        />
+        <ScopeFilterSection
+          title="Segments"
+          rows={segments ?? []}
+          activeKey={activeKey}
+          onSelect={onSelect}
+          makeItem={segmentNavItem}
+        />
       </div>
     </nav>
   )
 }
 
 /**
- * Mobile scope switcher (md:hidden) shown in the list header, since the nav
- * sidebar is desktop-only. Same options as the sidebar, in a dropdown.
+ * Mobile scope switcher (lg:hidden) shown in the list header, since the nav
+ * sidebar is desktop-only. Same options as the sidebar (views + tags +
+ * segments), in a dropdown.
  */
 export function InboxScopeMenu({
   nav,
@@ -197,6 +299,7 @@ export function InboxScopeMenu({
   onSelect: (item: InboxNavItem) => void
 }) {
   const { data: tags } = useChatTagsWithCounts()
+  const { data: segments } = useInboxSegmentsWithCounts()
   const activeKey = inboxNavKey(nav)
 
   return (
@@ -206,7 +309,7 @@ export function InboxScopeMenu({
           type="button"
           className="flex items-center gap-1 text-sm font-semibold leading-tight"
         >
-          <span className="truncate">{scopeLabelFor(nav, tags)}</span>
+          <span className="truncate">{scopeLabelFor(nav, tags, segments)}</span>
           <ChevronDownIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
         </button>
       </DropdownMenuTrigger>
@@ -227,31 +330,20 @@ export function InboxScopeMenu({
             </DropdownMenuItem>
           )
         })}
-        {tags && tags.length > 0 && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-[11px] uppercase tracking-wide text-muted-foreground">
-              Tags
-            </DropdownMenuLabel>
-            {tags.map((t) => {
-              const item: InboxNavItem = { kind: 'tag', tagId: t.id }
-              return (
-                <DropdownMenuItem
-                  key={t.id}
-                  onClick={() => onSelect(item)}
-                  className={cn('gap-2', activeKey === inboxNavKey(item) && 'text-primary')}
-                >
-                  <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: t.color }}
-                  />
-                  <span className="min-w-0 flex-1 truncate">{t.name}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">{t.count}</span>
-                </DropdownMenuItem>
-              )
-            })}
-          </>
-        )}
+        <ScopeMenuSection
+          title="Tags"
+          rows={tags ?? []}
+          activeKey={activeKey}
+          onSelect={onSelect}
+          makeItem={tagNavItem}
+        />
+        <ScopeMenuSection
+          title="Segments"
+          rows={segments ?? []}
+          activeKey={activeKey}
+          onSelect={onSelect}
+          makeItem={segmentNavItem}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   )

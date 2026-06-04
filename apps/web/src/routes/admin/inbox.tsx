@@ -12,10 +12,8 @@ import {
 } from '@heroicons/react/24/solid'
 import { toast } from 'sonner'
 import { isValidTypeId } from '@quackback/ids'
-import type { ConversationId, ChatMessageId, ChatTagId } from '@quackback/ids'
+import type { ConversationId, ChatMessageId } from '@quackback/ids'
 import {
-  listConversationsFn,
-  getConversationFn,
   listChatMessagesFn,
   sendAgentMessageFn,
   addChatNoteFn,
@@ -35,7 +33,6 @@ import type {
   MessageReactionCount,
   ConversationDTO,
   ConversationPriority,
-  ConversationStatus,
 } from '@/lib/shared/chat/types'
 import { AdminBubble, UnreadDivider } from '@/components/admin/chat/admin-bubble'
 import { PriorityControl } from '@/components/admin/chat/priority-control'
@@ -49,13 +46,20 @@ import { SavedMessagesColumn } from '@/components/admin/chat/saved-messages-colu
 import { ChatNoteEditor, type ChatNoteEditorHandle } from '@/components/admin/chat/chat-note-editor'
 import {
   InboxNavSidebar,
-  inboxNavKey,
   isInboxView,
   scopeLabelFor,
   useChatTagsWithCounts,
-  type InboxNavItem,
-  type InboxView,
+  useInboxSegmentsWithCounts,
 } from '@/components/admin/chat/inbox-nav-sidebar'
+import {
+  inboxNavKey,
+  navFromSearch,
+  PRIORITY_VALUES,
+  type InboxNavItem,
+  type InboxSearch,
+  type StatusFilter,
+} from '@/lib/client/chat/inbox-scope'
+import { chatInboxQueries } from '@/lib/client/queries/chat-inbox'
 import type { JSONContent } from '@tiptap/core'
 import { useChatStream } from '@/lib/client/hooks/use-chat-stream'
 import { useChatTyping } from '@/lib/client/hooks/use-chat-typing'
@@ -71,23 +75,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/shared/utils'
 import type { FeatureFlags } from '@/lib/shared/types/settings'
-
-/** A real conversation status, or 'all' = no status filter. */
-type StatusFilter = ConversationStatus | 'all'
-
-const PRIORITY_VALUES = ['all', 'none', 'low', 'medium', 'high', 'urgent'] as const
-
-/** Inbox URL search params — the source of truth for the open chat + filters. */
-export interface InboxSearch {
-  c?: string
-  /** Deep-link target message within `c` — scrolled to + flashed on open. */
-  m?: string
-  view?: InboxView
-  tag?: string
-  status?: StatusFilter
-  priority?: ConversationPriority | 'all'
-  q?: string
-}
 
 export const Route = createFileRoute('/admin/inbox')({
   // `?c=<conversationId>` deep-links a conversation open (e.g. from a user
@@ -109,6 +96,12 @@ export const Route = createFileRoute('/admin/inbox')({
       typeof search.tag === 'string' && isValidTypeId(search.tag, 'chat_tag')
         ? search.tag
         : undefined,
+    // Only accept a well-formed segment id — a malformed `?segment=` would reach
+    // a uuid-backed membership subquery and 500 the conversation list.
+    segment:
+      typeof search.segment === 'string' && isValidTypeId(search.segment, 'segment')
+        ? search.segment
+        : undefined,
     status:
       search.status === 'open' ||
       search.status === 'pending' ||
@@ -121,9 +114,48 @@ export const Route = createFileRoute('/admin/inbox')({
       : undefined,
     q: typeof search.q === 'string' && search.q ? search.q : undefined,
   }),
-  loader: async () => {
+  // Re-run the prefetch when the scope / filters / open conversation change, so
+  // a client-side navigation re-warms the cache too. ensureQueryData is a no-op
+  // when the data is still fresh, so this doesn't double-fetch.
+  loaderDeps: ({ search }) => ({
+    view: search.view,
+    tag: search.tag,
+    segment: search.segment,
+    status: search.status,
+    priority: search.priority,
+    q: search.q,
+    c: search.c,
+  }),
+  loader: async ({ deps, context }) => {
     const { requireWorkspaceRole } = await import('@/lib/server/functions/workspace-utils')
     await requireWorkspaceRole({ data: { allowedRoles: ['admin', 'member'] } })
+    const flags = context.settings?.featureFlags as FeatureFlags | undefined
+    // The component redirects when the flag is off — don't pay for a prefetch.
+    if (!flags?.supportInbox) return {}
+    const { queryClient } = context
+    const nav = navFromSearch(deps)
+    const status = deps.status ?? 'open'
+    const priority = deps.priority ?? 'all'
+    const search = (deps.q ?? '').trim()
+    const isSaved = nav.kind === 'view' && nav.view === 'saved'
+    // Best-effort: a failed prefetch (e.g. a stale `?c=`) must never break the
+    // page — each is caught independently and the component's useQuery still
+    // fetches client-side, degrading to today's behavior.
+    const warm = (p: Promise<unknown>) => p.catch(() => undefined)
+    await Promise.all([
+      isSaved
+        ? undefined
+        : warm(
+            queryClient.ensureQueryData(
+              chatInboxQueries.conversationList(nav, status, priority, search)
+            )
+          ),
+      warm(queryClient.ensureQueryData(chatInboxQueries.tagCounts())),
+      warm(queryClient.ensureQueryData(chatInboxQueries.segmentCounts())),
+      deps.c
+        ? warm(queryClient.ensureQueryData(chatInboxQueries.thread(deps.c as ConversationId)))
+        : undefined,
+    ])
     return {}
   },
   component: InboxRoute,
@@ -143,32 +175,6 @@ function InboxRoute() {
   return <InboxPage />
 }
 
-/**
- * Map the active nav scope + filter chips to the list-query params. The primary
- * views ARE the assignee queue (Mine / Unassigned / All); Mentions is a personal
- * feed; a Label scope refines by tag. Status + priority are optional chips
- * ('all' = unset), applied within any non-Mentions scope.
- */
-function buildListParams(
-  nav: InboxNavItem,
-  status: StatusFilter,
-  priorityFilter: ConversationPriority | 'all',
-  search: string
-) {
-  const priority = priorityFilter === 'all' ? undefined : priorityFilter
-  const statusParam = status === 'all' ? undefined : status
-  const q = search || undefined
-  if (nav.kind === 'tag') return { tagIds: [nav.tagId], status: statusParam, priority, search: q }
-  if (nav.view === 'mentions') return { view: 'mentions' as const, search: q }
-  const assignee =
-    nav.view === 'mine'
-      ? ('mine' as const)
-      : nav.view === 'unassigned'
-        ? ('unassigned' as const)
-        : ('all' as const)
-  return { status: statusParam, priority, assignee, search: q }
-}
-
 function InboxPage() {
   const queryClient = useQueryClient()
   const navigate = Route.useNavigate()
@@ -177,6 +183,7 @@ function InboxPage() {
     m: urlM,
     view: urlView,
     tag: urlTag,
+    segment: urlSegment,
     status: urlStatus,
     priority: urlPriority,
     q: urlQ,
@@ -198,20 +205,33 @@ function InboxPage() {
   )
 
   // Left-nav scope: an assignee queue (Mine / Unassigned / All), the Mentions
-  // feed, or a single Label. Status/priority chips refine WITHIN it; Mentions is
-  // a self-contained feed so those chips are hidden.
+  // feed, a single Label, or a single Segment. Scopes are mutually exclusive;
+  // tag wins over segment wins over view if the URL somehow carries more than
+  // one. Status/priority chips refine WITHIN it; Mentions is a self-contained
+  // feed so those chips are hidden.
   const nav = useMemo<InboxNavItem>(
-    () =>
-      urlTag
-        ? { kind: 'tag', tagId: urlTag as ChatTagId }
-        : { kind: 'view', view: urlView ?? 'all' },
-    [urlTag, urlView]
+    () => navFromSearch({ tag: urlTag, segment: urlSegment, view: urlView }),
+    [urlTag, urlSegment, urlView]
   )
+  // Per-scope memory: each scope (view / tag / segment, keyed by inboxNavKey)
+  // remembers the conversation last open in it, so returning to a scope resumes
+  // where you left off instead of carrying a now-out-of-scope thread across or
+  // dropping to an empty pane. Session-scoped (a refresh restores the current
+  // scope + conversation from the URL). It only ever re-opens a conversation you
+  // yourself had open here — never auto-opens an arbitrary unread one — so it
+  // can't silently clear unread badges the way auto-opening the top would.
+  const scopeMemory = useRef<Map<string, ConversationId>>(new Map())
+  // Selecting any scope clears the other two so exactly one stays in the URL,
+  // and resumes that scope's last-open conversation (or clears to the empty
+  // state when there's nothing remembered).
   const setNav = useCallback(
     (item: InboxNavItem) =>
       updateSearch({
         view: item.kind === 'view' ? item.view : undefined,
         tag: item.kind === 'tag' ? item.tagId : undefined,
+        segment: item.kind === 'segment' ? item.segmentId : undefined,
+        c: scopeMemory.current.get(inboxNavKey(item)),
+        m: undefined,
       }),
     [updateSearch]
   )
@@ -242,10 +262,12 @@ function InboxPage() {
     [updateSearch]
   )
 
-  // The status/priority chips apply to every scope except the Mentions feed.
-  const showRefinements = nav.kind === 'tag' || nav.view !== 'mentions'
+  // The status/priority chips apply to every scope except the Mentions feed
+  // (tag + segment scopes both refine by status/priority).
+  const showRefinements = nav.kind !== 'view' || nav.view !== 'mentions'
   const { data: navTags } = useChatTagsWithCounts()
-  const scopeLabel = scopeLabelFor(nav, navTags)
+  const { data: navSegments } = useInboxSegmentsWithCounts()
+  const scopeLabel = scopeLabelFor(nav, navTags, navSegments)
 
   // Search is a live local input mirrored (debounced) into the URL `q`.
   const [searchInput, setSearchInput] = useState(urlQ ?? '')
@@ -254,34 +276,48 @@ function InboxPage() {
     updateSearch({ q: search || undefined })
   }, [search, updateSearch])
 
-  const listKey = useMemo(
-    () =>
-      [
-        'admin',
-        'inbox',
-        'conversations',
-        inboxNavKey(nav),
-        status,
-        priorityFilter,
-        search,
-      ] as const,
-    [nav, status, priorityFilter, search]
-  )
-
   // The "Saved for later" view shows flagged MESSAGES, not conversations, so the
-  // conversation-list query is idle there.
+  // conversation-list query is idle there. The query options come from the shared
+  // factory so the route loader's SSR prefetch (same key) hydrates this read.
   const isSaved = nav.kind === 'view' && nav.view === 'saved'
   const { data: listData, isLoading: listLoading } = useQuery({
-    queryKey: listKey,
-    queryFn: () =>
-      listConversationsFn({
-        data: buildListParams(nav, status, priorityFilter, search),
-      }),
+    ...chatInboxQueries.conversationList(nav, status, priorityFilter, search),
     refetchInterval: 30_000, // polling fallback if the stream drops
     enabled: !isSaved,
   })
 
   const conversations = listData?.conversations ?? []
+
+  // Keep the active scope's memory in sync with what's open, so it's current the
+  // moment you switch away. Only remember a conversation that's actually IN this
+  // scope's list — a cross-scope deep-link (`?c=X` paired with an unrelated
+  // `?tag=`) must not pollute the scope's memory and resurface out of scope.
+  // (A conversation below the first page simply isn't remembered — recent ones
+  // dominate.) Closing a conversation forgets it for the scope.
+  useEffect(() => {
+    const key = inboxNavKey(nav)
+    if (selectedId && conversations.some((c) => c.id === selectedId)) {
+      scopeMemory.current.set(key, selectedId)
+    } else if (!selectedId) {
+      scopeMemory.current.delete(key)
+    }
+  }, [nav, selectedId, conversations])
+
+  // If the active tag/segment scope no longer exists (deleted here or by another
+  // agent, or a stale deep-link to a removed id), fall back to the default view
+  // instead of stranding the user on an empty, unlabelled scope. Guarded on the
+  // option list having loaded so a valid scope isn't reset mid-fetch.
+  useEffect(() => {
+    if (nav.kind === 'tag' && navTags && !navTags.some((t) => t.id === nav.tagId)) {
+      updateSearch({ tag: undefined })
+    } else if (
+      nav.kind === 'segment' &&
+      navSegments &&
+      !navSegments.some((s) => s.id === nav.segmentId)
+    ) {
+      updateSearch({ segment: undefined })
+    }
+  }, [nav, navTags, navSegments, updateSearch])
 
   // Live updates for the whole inbox over one cookie-authenticated stream.
   const refreshInbox = useCallback(() => {
@@ -368,8 +404,13 @@ function InboxPage() {
             prev ? { ...prev, messages: prev.messages.filter((m) => m.id !== evt.messageId) } : prev
         )
       } else if (evt.kind === 'conversation' && evt.conversation.id === selectedId) {
-        // Keep the open thread's status/assignment in sync with changes
-        // made by another agent.
+        // Keep the open thread in sync with changes another agent made. The agent
+        // DTO carries fresh tags too, so a foreign label change propagates here —
+        // tag mutations have no dedicated broadcast, so they ride on the next
+        // conversation event. Adopting it wholesale can briefly overwrite a tag
+        // THIS client just applied locally if a foreign metadata event interleaves;
+        // we accept that narrow, self-healing race rather than leave other agents'
+        // labels invisible until reload (reliable sync would need a tag broadcast).
         queryClient.setQueryData(
           ['admin', 'inbox', 'thread', selectedId],
           (prev: ThreadCache | undefined) =>
@@ -574,10 +615,9 @@ function ChatThread({
   const replyComposerRef = useRef<HTMLTextAreaElement>(null)
   const noteEditorRef = useRef<ChatNoteEditorHandle>(null)
 
-  const { data, isLoading } = useQuery({
-    queryKey: threadKey,
-    queryFn: () => getConversationFn({ data: { conversationId } }),
-  })
+  // Shared factory (same key as `threadKey`) so a `?c=` deep-link prefetched by
+  // the route loader hydrates this thread on first paint.
+  const { data, isLoading } = useQuery(chatInboxQueries.thread(conversationId))
 
   const messages = data?.messages ?? []
   const conversation = data?.conversation

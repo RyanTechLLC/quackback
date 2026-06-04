@@ -11,6 +11,7 @@ import {
   listChatTags,
   listChatTagsWithCounts,
   createChatTag,
+  updateChatTag,
   deleteChatTag,
   attachTag,
   detachTag,
@@ -26,6 +27,20 @@ const createChatTagSchema = z.object({
 })
 
 const deleteChatTagSchema = z.object({ id: z.string() })
+
+// Rename and/or recolor a label. At least one of name/color must be present.
+const updateChatTagSchema = z
+  .object({
+    id: z.string(),
+    name: z.string().min(1).max(50).optional(),
+    color: z
+      .string()
+      .regex(/^#[0-9A-Fa-f]{6}$/)
+      .optional(),
+  })
+  .refine((d) => d.name !== undefined || d.color !== undefined, {
+    message: 'Provide a name or color to update',
+  })
 
 // Add either an existing tag (`tagId`) or a brand-new one created on the fly
 // (`name`, optionally `color`). Exactly the inline "+ Add / create" flow.
@@ -67,6 +82,14 @@ export const createChatTagFn = createServerFn({ method: 'POST' })
     await requireAuth({ roles: ['admin', 'member'] })
     const tag = await createChatTag({ name: data.name, color: data.color })
     return { id: tag.id, name: tag.name, color: tag.color }
+  })
+
+/** Rename and/or recolor a conversation label. */
+export const updateChatTagFn = createServerFn({ method: 'POST' })
+  .inputValidator(updateChatTagSchema)
+  .handler(async ({ data }) => {
+    await requireAuth({ roles: ['admin', 'member'] })
+    return updateChatTag(data.id as ChatTagId, { name: data.name, color: data.color })
   })
 
 /** Soft-delete a conversation label. */
