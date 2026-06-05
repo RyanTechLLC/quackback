@@ -52,6 +52,18 @@ export type ChangelogId = TypeId<'changelog'>
 /** Changelog board ID - e.g., changelog_board_01h455vb4pex5vsknk084sn02q */
 export type ChangelogBoardId = TypeId<'changelog_board'>
 
+/** Support-inbox conversation ID - e.g., conversation_01h455vb4pex5vsknk084sn02q */
+export type ConversationId = TypeId<'conversation'>
+
+/** Support-inbox message ID - e.g., chat_msg_01h455vb4pex5vsknk084sn02q */
+export type ChatMessageId = TypeId<'chat_msg'>
+
+/** Conversation tag ("label") ID - e.g., chat_tag_01h455vb4pex5vsknk084sn02q */
+export type ChatTagId = TypeId<'chat_tag'>
+
+/** Chat-message @-mention ID - e.g., chat_msg_mention_01h455vb4pex5vsknk084sn02q */
+export type ChatMessageMentionId = TypeId<'chat_msg_mention'>
+
 /** Integration ID - e.g., integration_01h455vb4pex5vsknk084sn02q */
 export type IntegrationId = TypeId<'integration'>
 
@@ -81,6 +93,8 @@ export type UnsubTokenId = TypeId<'unsub_token'>
 
 /** In-app notification ID - e.g., notification_01h455vb4pex5vsknk084sn02q */
 export type NotificationId = TypeId<'notification'>
+
+export type PushDeviceId = TypeId<'push_device'>
 
 /** Post edit history ID - e.g., post_edit_01h455vb4pex5vsknk084sn02q */
 export type PostEditId = TypeId<'post_edit'>
@@ -247,6 +261,10 @@ export interface EntityIdMap {
   roadmap: RoadmapId
   changelog: ChangelogId
   changelog_board: ChangelogBoardId
+  conversation: ConversationId
+  chat_message: ChatMessageId
+  chat_tag: ChatTagId
+  chat_message_mention: ChatMessageMentionId
   integration: IntegrationId
   platform_cred: PlatformCredentialId
   event_mapping: EventMappingId
@@ -257,6 +275,7 @@ export interface EntityIdMap {
   notif_pref: NotifPrefId
   unsub_token: UnsubTokenId
   notification: NotificationId
+  push_device: PushDeviceId
   workspace: WorkspaceId
   user: UserId
   principal: PrincipalId

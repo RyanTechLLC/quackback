@@ -12,6 +12,7 @@ import {
 import { PencilSquareIcon, TrashIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { CheckBadgeIcon } from '@heroicons/react/24/solid'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { ReactionChip } from '@/components/shared/reaction-chip'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
@@ -102,6 +103,11 @@ interface CommentThreadProps {
   postId: PostId
   comments: PublicCommentView[]
   allowCommenting?: boolean
+  /**
+   * Commenting is denied for a signed-in viewer by the board's tier (authz, not
+   * authn): show "You don't have access" instead of a sign-in prompt.
+   */
+  noAccess?: boolean
   user?: { name: string | null; email: string; principalId?: PrincipalId }
   /** Logo URL for the team badge (from branding settings) */
   teamBadgeLogoUrl?: string
@@ -147,6 +153,7 @@ export function CommentThread({
   postId,
   comments,
   allowCommenting = true,
+  noAccess = false,
   user,
   teamBadgeLogoUrl,
   teamBadgeLabel,
@@ -198,6 +205,21 @@ export function CommentThread({
         <div className="flex items-center justify-center gap-3 py-4 px-4 bg-muted/30 [border-radius:var(--radius)] border border-border/30">
           <LockClosedIcon className="h-4 w-4 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">{lockedMessage}</p>
+        </div>
+      )
+    }
+
+    // Signed in but denied by the board's comment tier (segments/team) — an
+    // authorization failure, not authentication. State it; no sign-in affordance.
+    if (noAccess) {
+      return (
+        <div className="flex items-center justify-center gap-3 py-4 px-4 bg-muted/30 [border-radius:var(--radius)] border border-border/30">
+          <p className="text-sm text-muted-foreground">
+            {intl.formatMessage({
+              id: 'portal.commentThread.noAccess',
+              defaultMessage: "You don't have access to comment on this board",
+            })}
+          </p>
         </div>
       )
     }
@@ -718,26 +740,18 @@ function CommentItem({
               </Button>
             )}
 
-            {/* Existing reactions */}
+            {/* Existing reactions — hover shows who reacted. */}
             {!isDeleted &&
               reactions.map((reaction) => (
-                <button
+                <ReactionChip
                   key={reaction.emoji}
-                  data-testid="reaction-badge"
-                  onClick={() => handleReaction(reaction.emoji)}
+                  emoji={reaction.emoji}
+                  count={reaction.count}
+                  hasReacted={reaction.hasReacted}
+                  reactors={reaction.reactors}
                   disabled={isPending}
-                  className={cn(
-                    'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-all duration-150',
-                    'border hover:bg-muted',
-                    'bg-muted/50',
-                    reaction.hasReacted
-                      ? 'border-primary text-primary'
-                      : 'border-transparent text-muted-foreground'
-                  )}
-                >
-                  <span>{reaction.emoji}</span>
-                  <span>{reaction.count}</span>
-                </button>
+                  onToggle={() => handleReaction(reaction.emoji)}
+                />
               ))}
 
             {/* Add reaction button */}
