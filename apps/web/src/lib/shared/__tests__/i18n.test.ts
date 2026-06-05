@@ -19,7 +19,7 @@ describe('normalizeLocale', () => {
     expect(normalizeLocale('ru-RU')).toBe('ru')
   })
   it('returns null for locales without message catalogs', () => {
-    expect(normalizeLocale('pt-BR')).toBeNull()
+    expect(normalizeLocale('ja-JP')).toBeNull()
     expect(normalizeLocale('it')).toBeNull()
   })
   it('returns null for unsupported locale', () => {

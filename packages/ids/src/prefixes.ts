@@ -29,6 +29,12 @@ export const ID_PREFIXES = {
   changelog: 'changelog',
   changelog_board: 'changelog_board',
 
+  // Live chat
+  conversation: 'conversation',
+  chat_message: 'chat_msg',
+  chat_tag: 'chat_tag',
+  chat_message_mention: 'chat_msg_mention',
+
   // Help center
   category: 'category',
   article: 'article',
@@ -47,6 +53,9 @@ export const ID_PREFIXES = {
   notif_pref: 'notif_pref',
   unsub_token: 'unsub_token',
   notification: 'notification',
+
+  // Push devices (mobile agent app — APNs/FCM token registry)
+  push_device: 'push_device',
 
   // Users
   segment: 'segment',
